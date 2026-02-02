@@ -1,0 +1,63 @@
+# ===============================
+# Node / React
+# ===============================
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ===============================
+# Build output
+# ===============================
+dist/
+build/
+out/
+
+# ===============================
+# Environment files (Secrets)
+# ===============================
+.env
+.env.*
+!.env.example
+
+# ===============================
+# Firebase
+# ===============================
+.firebase/
+firebase-debug.log
+firestore-debug.log
+storage-debug.log
+*.json
+
+# ===============================
+# IDE / OS
+# ===============================
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# ===============================
+# Logs
+# ===============================
+logs/
+*.log
+
+# ===============================
+# Coverage / Tests
+# ===============================
+coverage/
+
+# ===============================
+# Temporary / Cache
+# ===============================
+.cache/
+.tmp/
+.temp/
+
+# ===============================
+# Optional: Vercel / Netlify
+# ===============================
+.vercel/
+.netlify/

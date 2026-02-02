@@ -1,0 +1,45 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Allow read/write access to the app for users
+    match /carpenters/{carpenterId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null && request.auth.uid == carpenterId;
+    }
+    
+    match /bookings/{bookingId} {
+      // Allow read access for all authenticated users
+      allow read: if request.auth != null;
+      // Allow write only for authenticated users
+      allow write: if request.auth != null;
+      // Only allow creation of new bookings with SEARCHING status
+      allow create: if request.auth != null && 
+                    request.resource.data.status == 'SEARCHING';
+      // Only allow status updates to valid transitions
+      allow update: if request.auth != null &&
+                     isValidStatusTransition(request.resource.data.status, 
+                                           resource.data.status) &&
+                     isAuthorizedToUpdate(request.auth.uid, resource.data);
+    }
+  }
+}
+
+// Helper function to validate status transitions
+function isValidStatusTransition(newStatus, oldStatus) {
+  // Define valid status transitions
+  return (oldStatus == 'SEARCHING' && 
+          (newStatus == 'ACCEPTED' || newStatus == 'CANCELLED')) ||
+         (oldStatus == 'ACCEPTED' && 
+          (newStatus == 'ON_THE_WAY' || newStatus == 'CANCELLED')) ||
+         (oldStatus == 'ON_THE_WAY' && 
+          (newStatus == 'ARRIVED' || newStatus == 'CANCELLED')) ||
+         (oldStatus == 'ARRIVED' && 
+          (newStatus == 'WORK_IN_PROGRESS' || newStatus == 'CANCELLED')) ||
+         (oldStatus == 'WORK_IN_PROGRESS' && newStatus == 'COMPLETED');
+}
+
+// Helper function to check if user is authorized to update booking
+function isAuthorizedToUpdate(userId, bookingData) {
+  // Carpenters can update their assigned bookings
+  return bookingData.assignedCarpenterId == userId;
+}

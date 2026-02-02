@@ -18,17 +18,18 @@ out/
 # Environment files (Secrets)
 # ===============================
 .env
-.env.*
-!.env.example
+.env.local
+.env.development
+.env.production
+.env.*.local
 
 # ===============================
-# Firebase
+# Firebase (ONLY logs, not config)
 # ===============================
 .firebase/
 firebase-debug.log
 firestore-debug.log
 storage-debug.log
-*.json
 
 # ===============================
 # IDE / OS

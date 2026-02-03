@@ -8,6 +8,7 @@ export enum JobStatus {
   SEARCHING = 'SEARCHING',
   PENDING = 'PENDING',
   ACCEPTED = 'ACCEPTED',
+  ACCEPT_TIMEOUT = 'ACCEPT_TIMEOUT',
   ON_THE_WAY = 'ON_THE_WAY',
   ARRIVED = 'ARRIVED',
   WORK_IN_PROGRESS = 'WORK_IN_PROGRESS',
@@ -67,6 +68,10 @@ export interface Carpenter {
   profilePhotoUrl?: string;
   createdAt?: any; // Firestore Timestamp
   updatedAt?: any; // Firestore Timestamp
+  
+  // EARNINGS DATA (may not exist in current documents)
+  weeklyEarnings?: number;
+  walletBalance?: number;
 }
 
 export interface Booking {
@@ -86,4 +91,10 @@ export interface Booking {
   isRated?: boolean;
   createdAt: number;
   pincode?: string; // Added for area-based matching
+  
+  // RATING SUBMISSION TRACKING
+  ratingSubmitted?: boolean; // Flag to indicate if rating has been submitted
+  ratingSubmittedAt?: number; // Timestamp when rating was submitted
+  ratingValue?: number; // Submitted rating value (1-5)
+  ratingTags?: string[]; // Tags associated with the rating
 }

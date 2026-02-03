@@ -43,11 +43,11 @@ const MyBookings: React.FC<MyBookingsProps> = ({ bookings, onUpdateStatus, onRat
   // );
 
   const pendingRating = bookings.filter(b => 
-    b.status === JobStatus.COMPLETED && !b.isRated
+    b.status === JobStatus.COMPLETED && !b.ratingSubmitted
   );
 
   const historyBookings = bookings.filter(b => 
-    b.status === JobStatus.COMPLETED && b.isRated
+    b.status === JobStatus.COMPLETED && b.ratingSubmitted
   ).sort((a, b) => b.createdAt - a.createdAt);
 
   return (
@@ -209,37 +209,33 @@ const MyBookings: React.FC<MyBookingsProps> = ({ bookings, onUpdateStatus, onRat
               <CheckCircle2 size={12} className="text-green-500" /> Work Completed - Please Rate
             </h3>
             {pendingRating.map(booking => (
-              <div key={booking.id} className="bg-gradient-to-r from-green-50 to-emerald-50 border-2 border-green-500 rounded-3xl p-6 shadow-lg mb-4 animate-in slide-in-from-left-4 relative overflow-hidden">
-                <div className="absolute top-0 right-0 bg-green-500 text-white text-[8px] font-black px-3 py-1 rounded-bl-xl tracking-widest uppercase">
+              <div key={booking.id} className="bg-green-50 border border-green-200 rounded-2xl p-4 mb-3 animate-in slide-in-from-left-4 relative overflow-hidden">
+                <div className="absolute top-0 right-0 bg-green-500 text-white text-[7px] font-black px-2 py-0.5 rounded-bl-lg tracking-widest uppercase">
                   COMPLETED
                 </div>
-                <div className="flex items-center gap-4 mb-4">
-                  <div className="w-12 h-12 bg-green-500 rounded-2xl flex items-center justify-center text-white">
-                    <CheckCircle2 size={24} />
+                <div className="flex items-start gap-3 mb-3">
+                  <div className="w-8 h-8 bg-green-500 rounded-xl flex items-center justify-center text-white mt-0.5">
+                    <CheckCircle2 size={16} />
                   </div>
                   <div>
-                    <h4 className="font-black text-amber-900 text-xl">{booking.service}</h4>
-                    <p className="text-sm text-gray-600 font-medium">Work has been completed!</p>
+                    <h4 className="font-black text-amber-900 text-lg">{booking.service}</h4>
+                    <div className="flex items-center gap-2 mt-1">
+                      <p className="text-xs text-gray-600 font-medium">Work has been completed!</p>
+                      <span className="text-xs text-gray-400">•</span>
+                      <p className="text-xs text-gray-600 font-medium">Completed by <span className="font-bold text-amber-900">{booking.mistry}</span></p>
+                    </div>
                   </div>
                 </div>
                 
-                <div className="bg-white rounded-2xl p-4 mb-4 shadow-sm">
-                  <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-black text-gray-500 uppercase tracking-widest">Completed by</span>
-                    <span className="text-sm font-bold text-amber-900">{booking.mistry}</span>
-                  </div>
-                  <p className="text-sm text-gray-600">Please rate your experience with this service</p>
-                </div>
-                
-                <div className="flex gap-2 mb-6 justify-center">
+                <div className="flex gap-1.5 mb-4 justify-center">
                   {[1, 2, 3, 4, 5].map(star => (
-                    <button key={star} onClick={() => handleStarClick(booking.id, star)} className="active:scale-125 transition-transform">
-                      <Star size={36} fill={star <= (ratingDraft[booking.id]?.value || 0) ? "#10B981" : "transparent"} className={star <= (ratingDraft[booking.id]?.value || 0) ? "text-green-500" : "text-gray-200"} />
+                    <button key={star} onClick={() => handleStarClick(booking.id, star)} className="active:scale-110 transition-transform">
+                      <Star size={28} fill={star <= (ratingDraft[booking.id]?.value || 0) ? "#10B981" : "transparent"} className={star <= (ratingDraft[booking.id]?.value || 0) ? "text-green-500" : "text-gray-200"} />
                     </button>
                   ))}
                 </div>
-                <button onClick={() => handleRatingSubmit(booking.id)} disabled={!(ratingDraft[booking.id]?.value)} className="w-full py-4 bg-green-600 text-white rounded-2xl font-black text-sm shadow-xl shadow-green-100 active:scale-95 disabled:opacity-50 transition-all flex items-center justify-center gap-2">
-                  <CheckCircle2 size={16} /> Submit Rating
+                <button onClick={() => handleRatingSubmit(booking.id)} disabled={!(ratingDraft[booking.id]?.value)} className="w-full py-2.5 bg-green-600 text-white rounded-xl font-black text-sm shadow-sm active:scale-95 disabled:opacity-50 transition-all flex items-center justify-center gap-1.5">
+                  <CheckCircle2 size={14} /> Submit Rating
                 </button>
               </div>
             ))}
@@ -251,12 +247,12 @@ const MyBookings: React.FC<MyBookingsProps> = ({ bookings, onUpdateStatus, onRat
            <h3 className="text-[10px] font-black uppercase tracking-widest text-amber-900 mb-3 flex items-center gap-2">
             <History size={12} className="text-gray-400" /> {t('past_fixes')}
           </h3>
-          <div className="flex flex-col gap-3">
+          <div className="flex flex-col gap-2">
             {historyBookings.length > 0 ? historyBookings.map(job => (
-              <div key={job.id} className="bg-white border border-gray-100 rounded-2xl p-4 flex items-center justify-between shadow-sm group hover:border-orange-200 transition-all">
-                <div className="flex items-center gap-3 flex-1 overflow-hidden">
-                  <div className="w-10 h-10 bg-green-50 rounded-xl flex items-center justify-center text-green-600 shrink-0">
-                    <CheckCircle2 size={20} />
+              <div key={job.id} className="bg-white border border-gray-100 rounded-xl p-3 flex items-center justify-between shadow-xs group hover:border-orange-200 transition-all">
+                <div className="flex items-center gap-2 flex-1 overflow-hidden">
+                  <div className="w-8 h-8 bg-green-50 rounded-lg flex items-center justify-center text-green-600 shrink-0">
+                    <CheckCircle2 size={16} />
                   </div>
                   <div className="overflow-hidden">
                     <h4 className="text-sm font-bold text-amber-900 leading-tight truncate">{job.service}</h4>
@@ -267,13 +263,34 @@ const MyBookings: React.FC<MyBookingsProps> = ({ bookings, onUpdateStatus, onRat
                     </div>
                   </div>
                 </div>
-                <div className="text-right shrink-0 ml-4">
+                <div className="text-right shrink-0 ml-3">
                   <p className="text-sm font-black text-amber-900 flex items-center justify-end gap-0.5">
                     {job.price}
                   </p>
-                  <div className="flex items-center justify-end gap-0.5 mt-0.5">
-                    <Star size={10} fill="#EA580C" className="text-orange-600" />
-                    <span className="text-[10px] font-black text-orange-600">Rated</span>
+                  <div className="flex flex-col items-end gap-0.5 mt-0.5">
+                    <div className="flex items-center gap-0.5">
+                      <Star size={10} fill="#EA580C" className="text-orange-600" />
+                      <span className="text-[10px] font-black text-orange-600">
+                        {job.ratingValue ? `${job.ratingValue}.0` : '5.0'}
+                      </span>
+                    </div>
+                    {job.ratingTags && job.ratingTags.length > 0 && (
+                      <div className="flex flex-wrap gap-1 justify-end max-w-[120px]">
+                        {job.ratingTags.slice(0, 2).map((tag, index) => (
+                          <span 
+                            key={index}
+                            className="text-[8px] bg-orange-50 text-orange-700 px-1.5 py-0.5 rounded-full font-medium truncate max-w-[60px]"
+                          >
+                            {tag}
+                          </span>
+                        ))}
+                        {job.ratingTags.length > 2 && (
+                          <span className="text-[8px] bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded-full font-medium">
+                            +{job.ratingTags.length - 2}
+                          </span>
+                        )}
+                      </div>
+                    )}
                   </div>
                 </div>
               </div>

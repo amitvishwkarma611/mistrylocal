@@ -9,7 +9,8 @@ import {
   serverTimestamp, 
   runTransaction,
   deleteDoc,
-  getDocs
+  getDocs,
+  getDoc
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { JobStatus } from '../types';
@@ -134,8 +135,18 @@ export interface BookingData {
   assignedCarpenterName?: string;
   createdAt: any; // Firestore server timestamp
   updatedAt?: any; // Firestore server timestamp
+  acceptedAt?: any; // Firestore server timestamp - when booking was accepted
+  acceptTimeoutAt?: any; // Firestore server timestamp - when timeout should occur
+  acceptTimedOutAt?: any; // Firestore server timestamp - when timeout actually occurred
+  startedAt?: any; // Firestore server timestamp - when work started
   distanceKm?: number; // Calculated distance for nearby jobs
   wave?: number; // Wave priority (1, 2, or 3) - UI ONLY
+  
+  // RATING SUBMISSION TRACKING
+  ratingSubmitted?: boolean; // Flag to indicate if rating has been submitted
+  ratingSubmittedAt?: any; // Firestore server timestamp - when rating was submitted
+  ratingValue?: number; // Submitted rating value (1-5)
+  ratingTags?: string[]; // Tags associated with the rating
 }
 
 // Interface for job inbox item
@@ -174,11 +185,18 @@ export interface CarpenterData {
   profilePhotoUrl?: string;
   createdAt?: any; // Firestore Timestamp
   updatedAt?: any; // Firestore Timestamp
+  
+  // EARNINGS DATA (may not exist in current documents)
+  weeklyEarnings?: number;
+  walletBalance?: number;
 }
 
 // ACCEPT JOB CONCURRENCY GUARD
 // Prevent multiple concurrent acceptJob calls for the same booking
 const activeAcceptRequests = new Set<string>(); // Track booking IDs being processed
+
+// CARPENTER ACTIVE JOB TRACKING - Ensures one job per carpenter
+const carpenterActiveJobs = new Map<string, string>(); // carpenterId -> bookingId
 
 // POLLING SYSTEM STATE
 // Track active polling timers
@@ -249,10 +267,18 @@ export const acceptJobWithNotification = async (
       return false; // Already being processed
     }
     
+    // CARPENTER JOB LIMIT CHECK: Prevent carpenter from taking multiple jobs
+    if (carpenterActiveJobs.has(carpenterId)) {
+      const existingBookingId = carpenterActiveJobs.get(carpenterId);
+      console.warn(`⚠️ Carpenter ${carpenterId} already has active job ${existingBookingId}`);
+      return false; // Carpenter already has an active job
+    }
+    
     // Mark this booking as being processed
     activeAcceptRequests.add(bookingId);
     
     const bookingRef = doc(db, 'bookings', bookingId);
+    const carpenterRef = doc(db, 'carpenters', carpenterId);
     
     try {
       // SINGLE TRANSACTION - no retry loops, no exponential backoff
@@ -271,28 +297,54 @@ export const acceptJobWithNotification = async (
           throw new Error('Job is no longer available');
         }
         
-        // ATOMIC UPDATE - status and assignment in one operation
+        // Read carpenter document to verify availability
+        const carpenterSnapshot = await transaction.get(carpenterRef);
+        
+        if (!carpenterSnapshot.exists()) {
+          throw new Error('Carpenter does not exist');
+        }
+        
+        const carpenterData = carpenterSnapshot.data() as any;
+        
+        // VERIFY carpenter doesn't already have an active job
+        if (carpenterData.activeJobId) {
+          throw new Error('Carpenter already has an active job');
+        }
+        
+        // Calculate timeout time (5 minutes from now)
+        const acceptTimeoutAt = new Date(Date.now() + 300000); // 5 minutes = 300000 ms
+        
+        // ATOMIC UPDATE - booking status and assignment with timeout fields
         transaction.update(bookingRef, {
           status: JobStatus.ACCEPTED,
           assignedCarpenterId: carpenterId,
           assignedCarpenterName: carpenterName,
+          acceptedAt: serverTimestamp(),
+          acceptTimeoutAt: acceptTimeoutAt,
+          updatedAt: serverTimestamp()
+        });
+        
+        // ATOMIC UPDATE - carpenter active job tracking
+        transaction.update(carpenterRef, {
+          activeJobId: bookingId,
+          isAvailable: false,
           updatedAt: serverTimestamp()
         });
       });
       
-      // SUCCESS: Now clean up other carpenters' inboxes
+      // SUCCESS: Update local tracking
+      carpenterActiveJobs.set(carpenterId, bookingId);
       console.log(`✅ Job ${bookingId} accepted by carpenter ${carpenterId}`);
-      
-      // With polling architecture, no inbox cleanup is needed
-      // The job will naturally disappear from polling results when status changes
       
       return true;
     } catch (error: any) {
       console.error('❌ Error accepting job:', error);
       
-      // FAILURE MEANS JOB TAKEN - no retries, no storm
-      if (error.message.includes('available') || error.message.includes('does not exist')) {
-        return false; // Job was already taken by another carpenter
+      // FAILURE MEANS JOB TAKEN OR CARPENTER BUSY - no retries, no storm
+      if (error.message.includes('available') || 
+          error.message.includes('does not exist') || 
+          error.message.includes('active job')) {
+        return false; // Job was already taken or carpenter busy
       }
       
       throw error; // Re-throw other errors for UI to handle
@@ -455,6 +507,7 @@ export const forceCleanupAllListeners = (): void => {
   writeQueue.length = 0; // Clear queue
   isProcessingQueue = false;
   pollingErrorCount = 0;
+  carpenterActiveJobs.clear(); // Clear carpenter job tracking
   
   console.log('✅ All polling stopped and tracking collections cleaned up');
 };
@@ -491,6 +544,245 @@ export const createBooking = async (bookingData: Omit<BookingData, 'id' | 'statu
  */
 export const acceptJob = async (bookingId: string, carpenterId: string, carpenterName: string): Promise<boolean> => {
   return acceptJobWithNotification(bookingId, carpenterId, carpenterName);
+};
+
+/**
+ * Checks if an accepted booking has timed out and handles the timeout if needed
+ * LAZY EVALUATION - Only executes when booking is read/accessed
+ * QUOTA-SAFE: Uses conditional transaction to ensure only one client succeeds
+ * @param bookingData - The booking data to check
+ * @returns Promise<boolean> - true if timeout was processed, false otherwise
+ */
+export const checkAndHandleBookingTimeout = async (bookingData: BookingData): Promise<boolean> => {
+  // Only check ACCEPTED bookings that have timeout configuration
+  if (bookingData.status !== JobStatus.ACCEPTED || 
+      !bookingData.acceptTimeoutAt || 
+      bookingData.startedAt) {
+    return false; // Not eligible for timeout check
+  }
+  
+  // Convert Firestore timestamp to Date for comparison
+  const timeoutTime = bookingData.acceptTimeoutAt.toDate ? 
+    bookingData.acceptTimeoutAt.toDate() : 
+    new Date(bookingData.acceptTimeoutAt);
+  
+  // Check if timeout has expired
+  if (Date.now() <= timeoutTime.getTime()) {
+    return false; // Not timed out yet
+  }
+  
+  // Timeout has expired - attempt to process it
+  const bookingId = bookingData.id;
+  if (!bookingId) return false;
+  
+  const bookingRef = doc(db, 'bookings', bookingId);
+  const carpenterId = bookingData.assignedCarpenterId;
+  
+  // Add in-memory guard to prevent duplicate processing
+  const processedTimeouts = new Set<string>();
+  
+  try {
+    // Check if already processed in this session
+    if (processedTimeouts.has(bookingId)) {
+      return false;
+    }
+    
+    await runTransaction(db, async (transaction) => {
+      // STEP 1 — READS ONLY
+      // Read booking document
+      const bookingSnapshot = await transaction.get(bookingRef);
+      
+      if (!bookingSnapshot.exists()) {
+        throw new Error('Booking does not exist');
+      }
+      
+      const currentBookingData = bookingSnapshot.data() as BookingData;
+      
+      // Read carpenter document (if assigned)
+      let carpenterData: any = null;
+      let carpenterRef: any = null;
+      
+      if (carpenterId) {
+        carpenterRef = doc(db, 'carpenters', carpenterId);
+        const carpenterSnapshot = await transaction.get(carpenterRef);
+        
+        if (carpenterSnapshot.exists()) {
+          carpenterData = carpenterSnapshot.data() as any;
+        }
+      }
+      
+      // STEP 2 — VALIDATION
+      // If booking.status !== "ACCEPTED", exit transaction
+      if (currentBookingData.status !== JobStatus.ACCEPTED) {
+        throw new Error('Booking no longer in ACCEPTED state');
+      }
+      
+      // If booking.startedAt exists, exit transaction
+      if (currentBookingData.startedAt) {
+        throw new Error('Booking already started');
+      }
+      
+      // If booking.acceptTimedOutAt exists, exit transaction
+      if (currentBookingData.acceptTimedOutAt) {
+        throw new Error('Booking already timed out');
+      }
+      
+      // If currentTime <= booking.acceptTimeoutAt, exit transaction
+      const timeoutTime = currentBookingData.acceptTimeoutAt.toDate ? 
+        currentBookingData.acceptTimeoutAt.toDate() : 
+        new Date(currentBookingData.acceptTimeoutAt);
+      
+      if (Date.now() <= timeoutTime.getTime()) {
+        throw new Error('Booking not yet timed out');
+      }
+      
+      // STEP 3 — WRITES (ONLY AFTER ALL READS)
+      // Update booking
+      transaction.update(bookingRef, {
+        status: JobStatus.ACCEPT_TIMEOUT,
+        acceptTimedOutAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+      
+      // If carpenter is assigned and this is their active job, release them
+      if (carpenterData && carpenterData.activeJobId === bookingId) {
+        transaction.update(carpenterRef, {
+          activeJobId: null,
+          isAvailable: true,
+          updatedAt: serverTimestamp()
+        });
+      }
+    });
+    
+    // Mark as processed to prevent duplicates in this session
+    processedTimeouts.add(bookingId);
+    
+    console.log(`✅ Booking ${bookingId} timed out after 5 minutes of inactivity`);
+    return true;
+    
+  } catch (error: any) {
+    // Expected failures when another client processed the timeout first
+    if (error.message.includes('not yet timed out') || 
+        error.message.includes('already started') || 
+        error.message.includes('already timed out') || 
+        error.message.includes('no longer in ACCEPTED state') ||
+        error.message.includes('does not exist')) {
+      return false; // Timeout conditions no longer met or already processed
+    }
+    
+    console.error(`❌ Error processing booking timeout for ${bookingId}:`, error);
+    throw error; // Re-throw unexpected errors
+  }
+};
+
+/**
+ * Releases a carpenter's active job assignment
+ * Called when job is completed, cancelled, or carpenter becomes available
+ * @param carpenterId - ID of the carpenter
+ * @param bookingId - ID of the booking being released (optional for validation)
+ */
+export const releaseCarpenterJob = async (carpenterId: string, bookingId?: string): Promise<void> => {
+  const carpenterRef = doc(db, 'carpenters', carpenterId);
+  
+  try {
+    await runTransaction(db, async (transaction) => {
+      const carpenterSnapshot = await transaction.get(carpenterRef);
+      
+      if (!carpenterSnapshot.exists()) {
+        throw new Error('Carpenter does not exist');
+      }
+      
+      const carpenterData = carpenterSnapshot.data() as any;
+      
+      // Validate that this is the correct booking being released (if provided)
+      if (bookingId && carpenterData.activeJobId !== bookingId) {
+        throw new Error('Carpenter does not have this booking assigned');
+      }
+      
+      // Update carpenter document
+      transaction.update(carpenterRef, {
+        activeJobId: null,
+        isAvailable: true,
+        updatedAt: serverTimestamp()
+      });
+    });
+    
+    // Update local tracking
+    carpenterActiveJobs.delete(carpenterId);
+    console.log(`✅ Carpenter ${carpenterId} job released`);
+    
+  } catch (error) {
+    console.error('❌ Error releasing carpenter job:', error);
+    throw error;
+  }
+};
+
+/**
+ * Marks a booking as started (WORK_IN_PROGRESS)
+ * PROTECTS AGAINST TIMEOUT: Sets startedAt timestamp to prevent timeout processing
+ * @param bookingId - ID of the booking to start
+ * @returns Promise<void>
+ */
+export const startBookingJob = async (bookingId: string): Promise<void> => {
+  const bookingRef = doc(db, 'bookings', bookingId);
+  
+  try {
+    await runTransaction(db, async (transaction) => {
+      const bookingSnapshot = await transaction.get(bookingRef);
+      
+      if (!bookingSnapshot.exists()) {
+        throw new Error('Booking does not exist');
+      }
+      
+      const bookingData = bookingSnapshot.data() as BookingData;
+      
+      // Verify booking is in ACCEPTED state
+      if (bookingData.status !== JobStatus.ACCEPTED) {
+        throw new Error('Booking is not in ACCEPTED state');
+      }
+      
+      // Update booking to WORK_IN_PROGRESS with startedAt timestamp
+      // The startedAt timestamp prevents timeout processing
+      transaction.update(bookingRef, {
+        status: JobStatus.WORK_IN_PROGRESS,
+        startedAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+    });
+    
+    console.log(`✅ Booking ${bookingId} marked as started`);
+    
+  } catch (error) {
+    console.error('❌ Error starting booking job:', error);
+    throw error;
+  }
+};
+
+/**
+ * Marks a booking as having submitted rating
+ * @param bookingId - ID of the booking
+ * @param ratingValue - Rating value (1-5)
+ * @param tags - Optional tags for the rating
+ */
+export const submitBookingRating = async (bookingId: string, ratingValue: number, tags: string[] = []): Promise<void> => {
+  return executeWriteOperation(`submit_rating_${bookingId}`, async () => {
+    try {
+      const bookingRef = doc(db, 'bookings', bookingId);
+      // SINGLE update - no retries
+      await updateDoc(bookingRef, {
+        ratingSubmitted: true,
+        ratingSubmittedAt: serverTimestamp(),
+        ratingValue: ratingValue,
+        ratingTags: tags,
+        updatedAt: serverTimestamp()
+      });
+      
+      console.log(`✅ Rating submitted for booking ${bookingId}: ${ratingValue} stars`);
+    } catch (error) {
+      console.error('❌ Error submitting booking rating:', error);
+      throw error;
+    }
+  });
 };
 
 // BOOKING STATUS UPDATE DEDUPLICATION
@@ -599,6 +891,23 @@ export const updateBookingStatus = async (bookingId: string, status: JobStatus):
       
       // Record successful update
       lastStatusUpdates.set(bookingId, { status, timestamp: now });
+      
+      // Release carpenter job if booking is completed or cancelled
+      if (status === JobStatus.COMPLETED || status === JobStatus.CANCELLED) {
+        // Get the booking to find the assigned carpenter
+        const bookingSnapshot = await getDoc(bookingRef);
+        if (bookingSnapshot.exists()) {
+          const bookingData = bookingSnapshot.data() as BookingData;
+          if (bookingData.assignedCarpenterId) {
+            try {
+              await releaseCarpenterJob(bookingData.assignedCarpenterId, bookingId);
+            } catch (error) {
+              console.warn('Warning: Failed to release carpenter job:', error);
+              // Don't throw error here as the status update succeeded
+            }
+          }
+        }
+      }
       
       console.log(`✅ Booking ${bookingId} status updated to: ${status}`);
     } catch (error) {
@@ -748,6 +1057,41 @@ export const fetchUserBookings = async (
     // Execute assigned query
     const assignedSnapshot = await getDocs(assignedQuery);
     assignedSnapshot.forEach((doc) => {
+      assignedBookings.push({
+        id: doc.id,
+        ...(doc.data() as BookingData)
+      });
+    });
+    
+    // Check for timeouts in all bookings
+    const allPotentialBookings = [...customerBookings, ...assignedBookings];
+    const timeoutChecks = allPotentialBookings.map(async (booking) => {
+      try {
+        await checkAndHandleBookingTimeout(booking);
+      } catch (error) {
+        // Silently handle timeout check errors to avoid disrupting main flow
+        console.debug(`Timeout check failed for booking ${booking.id}:`, error);
+      }
+    });
+    
+    // Wait for all timeout checks to complete
+    await Promise.all(timeoutChecks);
+    
+    // Re-fetch bookings after timeout processing to get updated statuses
+    const updatedCustomerSnapshot = await getDocs(customerQuery);
+    const updatedAssignedSnapshot = await getDocs(assignedQuery);
+    
+    customerBookings = [];
+    assignedBookings = [];
+    
+    updatedCustomerSnapshot.forEach((doc) => {
+      customerBookings.push({
+        id: doc.id,
+        ...(doc.data() as BookingData)
+      });
+    });
+    
+    updatedAssignedSnapshot.forEach((doc) => {
       assignedBookings.push({
         id: doc.id,
         ...(doc.data() as BookingData)

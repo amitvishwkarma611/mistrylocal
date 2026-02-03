@@ -9,7 +9,7 @@ import CarpenterAuth from './views/CarpenterAuth';
 import { MOCK_CARPENTERS } from './constants';
 import { translations, Language } from './translations';
 import { Home, User, Bell, Briefcase, RefreshCcw, Hammer, ShieldCheck, Star } from 'lucide-react';
-import { subscribeToUserBookings, updateBookingStatus as updateBookingStatusFirestore, cancelBooking } from './services/bookingService';
+import { subscribeToUserBookings, updateBookingStatus as updateBookingStatusFirestore, cancelBooking, releaseCarpenterJob, startBookingJob } from './services/bookingService';
 
 // Extend Window interface to include our custom properties
 declare global {
@@ -66,8 +66,83 @@ const App: React.FC = () => {
   const [language, setLanguage] = useState<Language>((localStorage.getItem('mistry_lang') as Language) || 'EN');
   const [bookings, setBookings] = useState<Booking[]>(INITIAL_BOOKINGS);
   const [carpenters, setCarpenters] = useState<Carpenter[]>([]);
+  const [carpenterProfile, setCarpenterProfile] = useState<Carpenter | null>(null);
   
   // Removed gpsInterval - no longer needed with area-based matching
+
+  // Fetch carpenter profile for carpenter users
+  useEffect(() => {
+    const fetchCarpenterProfile = async () => {
+      if (user && user.role === AppRole.CARPENTER && user.uid) {
+        try {
+          // Import Firestore functions locally to avoid circular dependencies
+          const { doc, getDoc } = await import('firebase/firestore');
+          const { db } = await import('./firebase');
+          
+          const carpenterDoc = await getDoc(doc(db, 'carpenters', user.uid));
+          if (carpenterDoc.exists()) {
+            const data = carpenterDoc.data();
+            // Map the fetched data to Carpenter interface
+            const profile: Carpenter = {
+              id: user.uid,
+              name: data.name || user.name || 'Carpenter User',
+              phone: data.phone || user.phone || '',
+              rating: typeof data.rating === 'number' ? data.rating : 0,
+              ratingCount: typeof data.ratingCount === 'number' ? data.ratingCount : 0,
+              jobsCompleted: typeof data.jobsCompleted === 'number' ? data.jobsCompleted : 0,
+              verified: Boolean(data.verified),
+              distance: '0.0 km',
+              specialties: Array.isArray(data.services) ? data.services : [],
+              acceptsSmallJobs: true,
+              image: data.profilePhotoUrl || 'https://picsum.photos/seed/carp3/200/200',
+              lat: typeof data.location?.lat === 'number' ? data.location.lat : 0,
+              lng: typeof data.location?.lng === 'number' ? data.location.lng : 0,
+              trustScore: typeof data.trustScore === 'number' ? data.trustScore : 0,
+              // Professional details (may not exist)
+              alternateMobileNumber: typeof data.alternateMobileNumber === 'string' ? data.alternateMobileNumber : undefined,
+              address: data.address,
+              addressProof: data.addressProof,
+              profilePhotoUrl: typeof data.profilePhotoUrl === 'string' ? data.profilePhotoUrl : undefined,
+              // Earnings fields (may not exist in current data)
+              weeklyEarnings: typeof data.weeklyEarnings === 'number' ? data.weeklyEarnings : 0,
+              walletBalance: typeof data.walletBalance === 'number' ? data.walletBalance : 0,
+              // Timestamps (may not exist)
+              createdAt: data.createdAt,
+              updatedAt: data.updatedAt
+            };
+            setCarpenterProfile(profile);
+          } else {
+            // If no profile exists, create a basic one
+            setCarpenterProfile({
+              id: user.uid,
+              name: user.name || 'Carpenter User',
+              phone: user.phone || '',
+              rating: 0,
+              ratingCount: 0,
+              jobsCompleted: 0,
+              verified: false,
+              distance: '0.0 km',
+              specialties: [],
+              acceptsSmallJobs: true,
+              image: 'https://picsum.photos/seed/carp3/200/200',
+              lat: 0,
+              lng: 0,
+              trustScore: 0,
+              weeklyEarnings: 0,
+              walletBalance: 0
+            });
+          }
+        } catch (error) {
+          console.error('Error fetching carpenter profile:', error);
+        }
+      } else {
+        // Clear profile when not a carpenter
+        setCarpenterProfile(null);
+      }
+    };
+
+    fetchCarpenterProfile();
+  }, [user]);
 
   const t = (key: keyof typeof translations.EN) => translations[language][key] || key;
 
@@ -182,10 +257,15 @@ const App: React.FC = () => {
               lng: b.location.lng,
               price: '₹400',
               isUpcoming: true,
-              isRated: false,
+              isRated: b.ratingSubmitted || false,
               customerName: b.customerName,
               createdAt: b.createdAt?.toDate?.().getTime() || Date.now(),
-              mistryId: b.assignedCarpenterId
+              mistryId: b.assignedCarpenterId,
+              // Rating submission tracking
+              ratingSubmitted: b.ratingSubmitted || false,
+              ratingSubmittedAt: b.ratingSubmittedAt?.toDate?.().getTime() || undefined,
+              ratingValue: b.ratingValue,
+              ratingTags: b.ratingTags || []
             }));
             
             setBookings(convertedBookings);
@@ -323,8 +403,31 @@ const App: React.FC = () => {
     });
   };
 
-  const handleRateBooking = (id: string, ratingValue: number, tags: string[]) => {
-    setBookings(prev => prev.map(b => b.id === id ? { ...b, isRated: true } : b));
+  const handleRateBooking = async (id: string, ratingValue: number, tags: string[]) => {
+    try {
+      // Update local state immediately for responsive UI
+      setBookings(prev => prev.map(b => b.id === id ? { 
+        ...b, 
+        isRated: true,
+        ratingSubmitted: true,
+        ratingValue: ratingValue,
+        ratingTags: tags
+      } : b));
+      
+      // Update Firestore with rating submission flag
+      const { submitBookingRating } = await import('./services/bookingService');
+      await submitBookingRating(id, ratingValue, tags);
+      
+      console.log(`✅ Rating submitted successfully for booking ${id}`);
+      
+      // Trigger a refresh to ensure UI updates properly
+      window.dispatchEvent(new CustomEvent('refreshBookings'));
+    } catch (error) {
+      console.error(`❌ Error submitting rating for booking ${id}:`, error);
+      // Revert local state on error
+      setBookings(prev => prev.map(b => b.id === id ? { ...b, isRated: false } : b));
+      throw error;
+    }
   };
 
   const handleLogin = (role: AppRole, identifier: string, name: string, uid: string) => {
@@ -565,47 +668,151 @@ const App: React.FC = () => {
                     </div>
                   </div>
                 ) : activeTab === 'profile' ? (
-                   <div className="p-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
+                  <div className="p-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                     <h2 className="text-3xl font-black text-amber-900 mb-8">{t('profile')}</h2>
                     
                     <div className="bg-white border-2 border-orange-50 rounded-[2.5rem] p-8 mb-8 shadow-sm">
                       <div className="flex items-center gap-4 mb-6">
                         <div className="relative">
-                          <img src="https://picsum.photos/seed/carp3/200/200" className="w-20 h-20 rounded-2xl object-cover border-2 border-orange-100" />
+                          <img 
+                            src={carpenterProfile?.profilePhotoUrl ?? "https://picsum.photos/seed/carp3/200/200"} 
+                            className="w-20 h-20 rounded-2xl object-cover border-2 border-orange-100" 
+                            onError={(e) => {
+                              const target = e.target as HTMLImageElement;
+                              target.src = "https://picsum.photos/seed/carp3/200/200";
+                            }}
+                          />
                           <div className="absolute -bottom-1 -right-1 bg-green-500 w-5 h-5 rounded-full border-2 border-white shadow-sm"></div>
                         </div>
                         <div>
                           <p className="text-[10px] font-black text-orange-600 uppercase tracking-widest mb-1">{t('carpenter_mode')}</p>
-                          <p className="text-2xl font-black text-amber-900 leading-tight">{user?.name || 'Carpenter Profile'}</p>
-                          <p className="text-sm font-bold text-gray-400">ID: ML-9920</p>
+                          <p className="text-2xl font-black text-amber-900 leading-tight">{carpenterProfile?.name ?? user?.name ?? 'Carpenter Profile'}</p>
+                          <p className="text-sm font-bold text-gray-400">ID: ML-{(carpenterProfile?.id ?? '').substring(0, 4).toUpperCase() || 'XXXX'}</p>
                         </div>
                       </div>
 
+                      {/* BASIC CONTACT DETAILS */}
+                      {(carpenterProfile?.phone || carpenterProfile?.alternateMobileNumber) && (
+                        <div className="mt-4 p-3 bg-gray-50 rounded-2xl border border-gray-100">
+                          <p className="text-[10px] font-black uppercase text-gray-500 tracking-widest mb-2">Contact Information</p>
+                          <div className="text-xs text-amber-900 space-y-1">
+                            {carpenterProfile?.phone && (
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium">Primary:</span>
+                                <span className="font-bold">{carpenterProfile.phone}</span>
+                              </div>
+                            )}
+                            {carpenterProfile?.alternateMobileNumber && (
+                              <div className="flex items-center gap-2">
+                                <span className="font-medium">Alternate:</span>
+                                <span className="font-bold">{carpenterProfile.alternateMobileNumber}</span>
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* RATING & TRUST */}
                       <div className="grid grid-cols-2 gap-3 pt-6 border-t border-gray-100">
                         <div className="text-center p-3">
-                          <p className="text-lg font-black text-amber-900">142</p>
+                          <p className="text-lg font-black text-amber-900">{carpenterProfile?.jobsCompleted ?? 0}</p>
                           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">Jobs Completed</p>
                         </div>
                         <div className="text-center p-3 border-l border-gray-100">
-                          <p className="text-lg font-black text-orange-600">4.9</p>
+                          <p className="text-lg font-black text-orange-600">{typeof carpenterProfile?.rating === 'number' ? carpenterProfile.rating.toFixed(1) : '0.0'}</p>
                           <p className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">Rating</p>
                         </div>
                       </div>
+                      
+                      {/* TRUST SCORE */}
+                      {carpenterProfile?.trustScore && carpenterProfile.trustScore > 0 && (
+                        <div className="mt-4 pt-4 border-t border-gray-100">
+                          <div className="flex items-center justify-between mb-2">
+                            <span className="text-[10px] font-black uppercase text-gray-500 tracking-widest">Trust Score</span>
+                            <span className="text-sm font-black text-green-600">{carpenterProfile.trustScore}%</span>
+                          </div>
+                          <div className="h-2 w-full bg-gray-200 rounded-full overflow-hidden">
+                            <div 
+                              className="h-full bg-green-500 rounded-full" 
+                              style={{ width: `${carpenterProfile.trustScore}%` }}
+                            ></div>
+                          </div>
+                        </div>
+                      )}
                     </div>
 
+                    {/* ADDRESS INFORMATION */}
+                    {carpenterProfile?.address && (
+                      <div className="p-6 bg-gray-50 rounded-[2rem] border border-gray-100 mb-4">
+                        <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-4">Address Information</p>
+                        <div className="text-xs text-amber-900 space-y-1">
+                          {carpenterProfile.address.line1 && <div>{carpenterProfile.address.line1}</div>}
+                          {carpenterProfile.address.line2 && <div>{carpenterProfile.address.line2}</div>}
+                          {carpenterProfile.address.area && <div>{carpenterProfile.address.area}</div>}
+                          {carpenterProfile.address.city && <div>{carpenterProfile.address.city}</div>}
+                          {carpenterProfile.address.state && <div>{carpenterProfile.address.state}</div>}
+                          {carpenterProfile.address.pincode && <div className="font-bold">Pincode: {carpenterProfile.address.pincode}</div>}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* ADDRESS PROOF */}
+                    {carpenterProfile?.addressProof && (
+                      <div className="p-6 bg-blue-50 rounded-[2rem] border border-blue-100 mb-4">
+                        <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest mb-4">Address Proof</p>
+                        <div className="text-xs text-blue-900 space-y-2">
+                          {carpenterProfile.addressProof.type && (
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium">Type:</span>
+                              <span className="font-bold bg-blue-100 px-2 py-1 rounded-md">{carpenterProfile.addressProof.type}</span>
+                            </div>
+                          )}
+                          {carpenterProfile.addressProof.documentNumber && (
+                            <div className="flex items-center gap-2">
+                              <span className="font-medium">Document:</span>
+                              <span className="font-bold">
+                                {'*' + '*'.repeat(Math.max(0, (carpenterProfile.addressProof.documentNumber?.length || 0) - 4)) + 
+                                (carpenterProfile.addressProof.documentNumber?.slice(-4) || '')}
+                              </span>
+                            </div>
+                          )}
+                          {carpenterProfile.addressProof.photoUrl && (
+                            <div className="mt-2">
+                              <span className="font-medium">Proof Photo:</span>
+                              <div className="mt-1 w-16 h-16 rounded-lg overflow-hidden border border-gray-200">
+                                <img 
+                                  src={carpenterProfile.addressProof.photoUrl} 
+                                  alt="Address Proof" 
+                                  className="w-full h-full object-cover"
+                                  onError={(e) => {
+                                    const target = e.target as HTMLImageElement;
+                                    target.style.display = 'none';
+                                  }}
+                                />
+                              </div>
+                            </div>
+                          )}
+                          {carpenterProfile.addressProof.verified && (
+                            <div className="flex items-center gap-1 mt-2">
+                              <ShieldCheck size={14} className="text-green-600" />
+                              <span className="text-green-700 font-bold text-xs">Verified</span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
                     <div className="space-y-4">
-
-
                       <div className="p-6 bg-gray-50 rounded-[2rem] border border-gray-100">
                         <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-4">Earnings & Wallet</p>
                         <div className="space-y-4">
                           <div className="flex items-center justify-between text-amber-900 font-bold text-sm">
                             <span>Weekly Earnings</span>
-                            <span className="text-green-600">₹8,450</span>
+                            <span className="text-green-600">₹{(carpenterProfile?.weeklyEarnings ?? 0).toLocaleString()}</span>
                           </div>
                           <div className="flex items-center justify-between text-amber-900 font-bold text-sm">
                             <span>Current Balance</span>
-                            <span className="text-amber-900">₹1,200</span>
+                            <span className="text-amber-900">₹{(carpenterProfile?.walletBalance ?? 0).toLocaleString()}</span>
                           </div>
                         </div>
                       </div>

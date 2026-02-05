@@ -22,6 +22,7 @@
     "autoprefixer": "^10.4.20",
     "pngjs": "^7.0.0",
     "postcss": "^8.5.1",
+    "sharp": "^0.34.5",
     "tailwindcss": "^3.4.17",
     "typescript": "~5.8.2",
     "vite": "^6.4.1",

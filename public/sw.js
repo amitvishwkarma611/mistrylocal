@@ -1,12 +1,10 @@
-const CACHE_NAME = 'mistrylocal-v2';
+const CACHE_NAME = 'mistrylocal-v3';
 const urlsToCache = [
   '/',
   '/index.html',
   '/manifest.json',
-  '/assets/index.css',
-  '/assets/index.js',
-  '/icons/icon-192x192.png',
-  '/icons/icon-512x512.png'
+  '/assets/',
+  '/icons/'
 ];
 
 self.addEventListener('install', (event) => {
@@ -20,10 +18,50 @@ self.addEventListener('install', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
+  // Skip non-GET requests
+  if (event.request.method !== 'GET') {
+    return;
+  }
+
+  // For development, bypass service worker for localhost requests
+  if (event.request.url.includes('localhost')) {
+    return;
+  }
+
   event.respondWith(
-    fetch(event.request)
-      .then(response => response)
-      .catch(() => caches.match(event.request))
+    caches.match(event.request)
+      .then((response) => {
+        // Return cached version if available
+        if (response) {
+          return response;
+        }
+        
+        // Otherwise fetch from network
+        return fetch(event.request)
+          .then((response) => {
+            // Check if we received a valid response
+            if (!response || response.status !== 200 || response.type !== 'basic') {
+              return response;
+            }
+
+            // Clone the response for caching
+            const responseToCache = response.clone();
+            
+            caches.open(CACHE_NAME)
+              .then((cache) => {
+                cache.put(event.request, responseToCache);
+              });
+
+            return response;
+          })
+          .catch(() => {
+            // Return a basic fallback for critical resources
+            if (event.request.url.endsWith('.html')) {
+              return new Response('App unavailable offline', { status: 503 });
+            }
+            return new Response('', { status: 404 });
+          });
+      })
   );
 });
 

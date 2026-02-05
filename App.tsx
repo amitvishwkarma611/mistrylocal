@@ -1,11 +1,13 @@
 
 import React, { useState, useEffect, useRef, Component } from 'react';
-import { AppRole, Booking, JobStatus, Carpenter } from './types';
+import { AppRole, Booking, JobStatus, Carpenter, Customer } from './types';
 import CustomerHome from './views/CustomerHome';
 import CarpenterPortal from './views/CarpenterPortal';
 import MyBookings from './views/MyBookings';
 import CustomerAuth from './views/CustomerAuth';
 import CarpenterAuth from './views/CarpenterAuth';
+import CarpenterProfileEdit from './views/CarpenterProfileEdit';
+import CustomerProfileEdit from './views/CustomerProfileEdit';
 import { MOCK_CARPENTERS } from './constants';
 import { translations, Language } from './translations';
 import { Home, User, Bell, Briefcase, RefreshCcw, Hammer, ShieldCheck, Star } from 'lucide-react';
@@ -67,6 +69,7 @@ const App: React.FC = () => {
   const [bookings, setBookings] = useState<Booking[]>(INITIAL_BOOKINGS);
   const [carpenters, setCarpenters] = useState<Carpenter[]>([]);
   const [carpenterProfile, setCarpenterProfile] = useState<Carpenter | null>(null);
+  const [customerProfile, setCustomerProfile] = useState<Customer | null>(null);
   
   // Removed gpsInterval - no longer needed with area-based matching
 
@@ -144,6 +147,54 @@ const App: React.FC = () => {
     fetchCarpenterProfile();
   }, [user]);
 
+  // Fetch customer profile for customer users
+  useEffect(() => {
+    const fetchCustomerProfile = async () => {
+      if (user && user.role === AppRole.CUSTOMER && user.uid) {
+        try {
+          // Import Firestore functions locally to avoid circular dependencies
+          const { doc, getDoc } = await import('firebase/firestore');
+          const { db } = await import('./firebase');
+          
+          const customerDoc = await getDoc(doc(db, 'customers', user.uid));
+          if (customerDoc.exists()) {
+            const data = customerDoc.data();
+            // Map the fetched data to Customer interface
+            const profile: Customer = {
+              id: user.uid,
+              name: data.name || user.name || 'Customer User',
+              phone: data.phone || user.phone || '',
+              email: typeof data.email === 'string' ? data.email : undefined,
+              address: data.address,
+              profilePhotoUrl: typeof data.profilePhotoUrl === 'string' ? data.profilePhotoUrl : undefined,
+              registrationDate: data.registrationDate,
+              lastActive: data.lastActive,
+              totalBookings: typeof data.totalBookings === 'number' ? data.totalBookings : 0,
+              rating: typeof data.rating === 'number' ? data.rating : 0
+            };
+            setCustomerProfile(profile);
+          } else {
+            // If no profile exists, create a basic one
+            setCustomerProfile({
+              id: user.uid,
+              name: user.name || 'Customer User',
+              phone: user.phone || '',
+              totalBookings: 0,
+              rating: 0
+            });
+          }
+        } catch (error) {
+          console.error('Error fetching customer profile:', error);
+        }
+      } else {
+        // Clear profile when not a customer
+        setCustomerProfile(null);
+      }
+    };
+
+    fetchCustomerProfile();
+  }, [user]);
+
   const t = (key: keyof typeof translations.EN) => translations[language][key] || key;
 
   useEffect(() => {
@@ -158,11 +209,27 @@ const App: React.FC = () => {
     const fetchBookings = async () => {
       if (user?.uid) {
         try {
-          await subscribeToUserBookings(
-            user.uid,
-            (bookingsData) => {
-              // Convert BookingData to Booking interface
-              const convertedBookings = bookingsData.map(b => ({
+          const fetchBookingsWithPhone = async (bookingsData) => {
+            const convertedBookings = await Promise.all(bookingsData.map(async (b) => {
+              let mistryPhone = '';
+              
+              // Get carpenter phone if assigned
+              if (b.assignedCarpenterId) {
+                try {
+                  const { doc, getDoc } = await import('firebase/firestore');
+                  const { db } = await import('./firebase');
+                  
+                  const carpenterDoc = await getDoc(doc(db, 'carpenters', b.assignedCarpenterId));
+                  if (carpenterDoc.exists()) {
+                    const carpenterData = carpenterDoc.data();
+                    mistryPhone = carpenterData.phone || '';
+                  }
+                } catch (error) {
+                  console.error('Error fetching carpenter phone:', error);
+                }
+              }
+              
+              return {
                 id: b.id || '',
                 service: b.description,
                 mistry: b.assignedCarpenterName || 'Searching...',
@@ -173,29 +240,43 @@ const App: React.FC = () => {
                 lng: b.location.lng,
                 price: '₹400',
                 isUpcoming: true,
-                isRated: false,
+                isRated: b.ratingSubmitted || false,
                 customerName: b.customerName,
+                customerPhone: b.customerPhone,
                 createdAt: b.createdAt?.toDate?.().getTime() || Date.now(),
-                mistryId: b.assignedCarpenterId
-              }));
+                mistryId: b.assignedCarpenterId,
+                mistryPhone: mistryPhone,
+                // Rating submission tracking
+                ratingSubmitted: b.ratingSubmitted || false,
+                ratingSubmittedAt: b.ratingSubmittedAt?.toDate?.().getTime() || undefined,
+                ratingValue: b.ratingValue,
+                ratingTags: b.ratingTags || []
+              };
+            }));
+            
+            // ONLY update if there are actual changes to prevent unnecessary re-renders
+            setBookings(prevBookings => {
+              // Deep comparison to check if bookings actually changed
+              const hasChanges = convertedBookings.length !== prevBookings.length || 
+                convertedBookings.some((newBooking, index) => {
+                  const oldBooking = prevBookings[index];
+                  return !oldBooking || 
+                    newBooking.id !== oldBooking.id || 
+                    newBooking.status !== oldBooking.status ||
+                    newBooking.mistry !== oldBooking.mistry;
+                });
               
-              // ONLY update if there are actual changes to prevent unnecessary re-renders
-              setBookings(prevBookings => {
-                // Deep comparison to check if bookings actually changed
-                const hasChanges = convertedBookings.length !== prevBookings.length || 
-                  convertedBookings.some((newBooking, index) => {
-                    const oldBooking = prevBookings[index];
-                    return !oldBooking || 
-                      newBooking.id !== oldBooking.id || 
-                      newBooking.status !== oldBooking.status ||
-                      newBooking.mistry !== oldBooking.mistry;
-                  });
-                
-                if (hasChanges) {
-                  return convertedBookings;
-                }
-                return prevBookings; // No changes, return existing array
-              });
+              if (hasChanges) {
+                return convertedBookings;
+              }
+              return prevBookings; // No changes, return existing array
+            });
+          };
+          
+          await subscribeToUserBookings(
+            user.uid,
+            async (bookingsData) => {
+              await fetchBookingsWithPhone(bookingsData);
             },
             (error) => {
               console.error('Booking fetch error:', error);
@@ -223,6 +304,61 @@ const App: React.FC = () => {
       }
     };
   }, [user?.uid]);
+  
+  // Update carpenter profile stats based on completed bookings
+  useEffect(() => {
+    if (user?.role === AppRole.CARPENTER && user.uid && carpenterProfile) {
+      // Calculate jobs completed and rating based on bookings
+      const completedBookings = bookings.filter(b => 
+        b.status === JobStatus.COMPLETED && b.mistryId === user.uid
+      );
+      
+      const jobsCompleted = completedBookings.length;
+      
+      // Calculate average rating from completed bookings that have been rated
+      const ratedBookings = completedBookings.filter(b => b.ratingSubmitted);
+      let avgRating = 0;
+      if (ratedBookings.length > 0) {
+        const totalRating = ratedBookings.reduce((sum, booking) => sum + (booking.ratingValue || 0), 0);
+        avgRating = totalRating / ratedBookings.length;
+      }
+      
+      // Update local profile state with calculated values
+      setCarpenterProfile(prev => {
+        if (!prev) return prev;
+        
+        // Only update if values have changed to prevent unnecessary re-renders
+        if (prev.jobsCompleted === jobsCompleted && 
+            Math.abs((prev.rating || 0) - avgRating) < 0.01) {
+          return prev;
+        }
+        
+        const updatedProfile = {
+          ...prev,
+          jobsCompleted,
+          rating: avgRating
+        };
+        
+        // Also update the values in Firestore to persist them
+        const updateFirestoreStats = async () => {
+          try {
+            const { updateCarpenterProfile } = await import('./services/bookingService');
+            await updateCarpenterProfile(user.uid, {
+              jobsCompleted,
+              rating: avgRating
+            });
+          } catch (error) {
+            console.error('Error updating carpenter stats in Firestore:', error);
+          }
+        };
+        
+        // Update Firestore in the background
+        updateFirestoreStats();
+        
+        return updatedProfile;
+      });
+    }
+  }, [bookings, user, carpenterProfile]);
 
   useEffect(() => {
     // Show auth flow if no user is logged in
@@ -239,14 +375,31 @@ const App: React.FC = () => {
     };
     
     // Listen for manual booking refresh requests
-    const handleRefreshBookings = () => {
+    const handleRefreshBookings = async () => {
       console.log('🔄 Manual booking refresh triggered');
       // Force immediate refresh
       if (user?.uid) {
-        subscribeToUserBookings(
-          user.uid,
-          (bookingsData) => {
-            const convertedBookings = bookingsData.map(b => ({
+        const fetchBookingsWithPhone = async (bookingsData) => {
+          const convertedBookings = await Promise.all(bookingsData.map(async (b) => {
+            let mistryPhone = '';
+            
+            // Get carpenter phone if assigned
+            if (b.assignedCarpenterId) {
+              try {
+                const { doc, getDoc } = await import('firebase/firestore');
+                const { db } = await import('./firebase');
+                
+                const carpenterDoc = await getDoc(doc(db, 'carpenters', b.assignedCarpenterId));
+                if (carpenterDoc.exists()) {
+                  const carpenterData = carpenterDoc.data();
+                  mistryPhone = carpenterData.phone || '';
+                }
+              } catch (error) {
+                console.error('Error fetching carpenter phone:', error);
+              }
+            }
+            
+            return {
               id: b.id || '',
               service: b.description,
               mistry: b.assignedCarpenterName || 'Searching...',
@@ -259,16 +412,25 @@ const App: React.FC = () => {
               isUpcoming: true,
               isRated: b.ratingSubmitted || false,
               customerName: b.customerName,
+              customerPhone: b.customerPhone,
               createdAt: b.createdAt?.toDate?.().getTime() || Date.now(),
               mistryId: b.assignedCarpenterId,
+              mistryPhone: mistryPhone,
               // Rating submission tracking
               ratingSubmitted: b.ratingSubmitted || false,
               ratingSubmittedAt: b.ratingSubmittedAt?.toDate?.().getTime() || undefined,
               ratingValue: b.ratingValue,
               ratingTags: b.ratingTags || []
-            }));
-            
-            setBookings(convertedBookings);
+            };
+          }));
+          
+          setBookings(convertedBookings);
+        };
+        
+        await subscribeToUserBookings(
+          user.uid,
+          async (bookingsData) => {
+            await fetchBookingsWithPhone(bookingsData);
           },
           (error) => {
             console.error('Booking fetch error:', error);
@@ -506,48 +668,55 @@ const App: React.FC = () => {
       {showAuth ? (
         authRole === null ? (
           // Enhanced role selection screen
-          <div className="p-8 min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-orange-50 to-amber-50">
-            <div className="text-center mb-10 animate-in fade-in slide-in-from-top-4 duration-500">
-              <h1 className="text-5xl font-black text-amber-900 mb-3">Mistry<span className="text-orange-600">Local</span></h1>
-              <p className="text-gray-500 font-bold text-lg">Connect skilled professionals with customers</p>
+          <div className="p-8 min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-orange-50 via-white to-amber-50 relative overflow-hidden">
+            {/* Floating decorative elements */}
+            <div className="absolute top-20 left-10 w-4 h-4 bg-orange-200 rounded-full float-animation opacity-60"></div>
+            <div className="absolute top-40 right-16 w-3 h-3 bg-amber-200 rounded-full float-animation opacity-40 delay-1000"></div>
+            <div className="absolute bottom-32 left-20 w-5 h-5 bg-orange-300 rounded-full float-animation opacity-50 delay-2000"></div>
+            
+            <div className="text-center mb-10 animate-in fade-in-up slide-in-from-bottom-4 duration-700 relative z-10">
+              <div className="mb-6 hover-lift inline-block">
+                <h1 className="text-5xl font-black text-amber-900 mb-3 drop-shadow-sm">Mistry<span className="text-orange-600">Local</span></h1>
+              </div>
+              <p className="text-gray-500 font-bold text-lg max-w-md mx-auto">Connect skilled professionals with customers</p>
             </div>
             
-            <div className="w-full max-w-md space-y-5 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <div className="w-full max-w-md space-y-5 animate-in fade-in-up slide-in-from-bottom-4 duration-700 delay-200 relative z-10">
               <button 
                 onClick={() => setAuthRole(AppRole.CUSTOMER)}
-                className="w-full p-7 bg-gradient-to-br from-white to-orange-50 border-2 border-orange-200 rounded-3xl shadow-lg hover:shadow-2xl transition-all active:scale-95 flex flex-col items-center gap-4 group"
+                className="w-full p-7 bg-gradient-to-br from-white to-orange-50 border-2 border-orange-200 rounded-3xl shadow-lg hover:shadow-2xl transition-all active:scale-95 flex flex-col items-center gap-4 group card-hover"
               >
-                <div className="w-20 h-20 bg-gradient-to-br from-orange-100 to-orange-200 rounded-2xl flex items-center justify-center group-hover:scale-105 transition-transform duration-300">
+                <div className="w-20 h-20 bg-gradient-to-br from-orange-100 to-orange-200 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform duration-300 hover-glow">
                   <User className="text-orange-600" size={36} />
                 </div>
                 <div className="text-center">
                   <h3 className="text-2xl font-black text-amber-900 mb-2 group-hover:text-orange-600 transition-colors">I'm a Customer</h3>
                   <p className="text-base text-gray-600 font-medium max-w-[280px]">Find skilled carpenters for your home projects</p>
                 </div>
-                <div className="mt-2 px-4 py-2 bg-orange-100 text-orange-700 rounded-full text-xs font-bold">
+                <div className="mt-2 px-4 py-2 bg-gradient-to-r from-orange-100 to-orange-200 text-orange-700 rounded-full text-xs font-bold shadow-sm">
                   Book Services
                 </div>
               </button>
               
               <button 
                 onClick={() => setAuthRole(AppRole.CARPENTER)}
-                className="w-full p-7 bg-gradient-to-br from-white to-amber-50 border-2 border-amber-200 rounded-3xl shadow-lg hover:shadow-2xl transition-all active:scale-95 flex flex-col items-center gap-4 group"
+                className="w-full p-7 bg-gradient-to-br from-white to-amber-50 border-2 border-amber-200 rounded-3xl shadow-lg hover:shadow-2xl transition-all active:scale-95 flex flex-col items-center gap-4 group card-hover"
               >
-                <div className="w-20 h-20 bg-gradient-to-br from-amber-100 to-amber-200 rounded-2xl flex items-center justify-center group-hover:scale-105 transition-transform duration-300">
+                <div className="w-20 h-20 bg-gradient-to-br from-amber-100 to-amber-200 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform duration-300 hover-glow">
                   <Hammer className="text-amber-900" size={36} />
                 </div>
                 <div className="text-center">
                   <h3 className="text-2xl font-black text-amber-900 mb-2 group-hover:text-amber-700 transition-colors">I'm a Mistry</h3>
                   <p className="text-base text-gray-600 font-medium max-w-[280px]">Get hired for carpentry jobs in your area</p>
                 </div>
-                <div className="mt-2 px-4 py-2 bg-amber-100 text-amber-800 rounded-full text-xs font-bold">
+                <div className="mt-2 px-4 py-2 bg-gradient-to-r from-amber-100 to-amber-200 text-amber-800 rounded-full text-xs font-bold shadow-sm">
                   Offer Services
                 </div>
               </button>
             </div>
             
-            <div className="mt-10 text-center">
-              <div className="inline-flex items-center gap-2 bg-white/80 px-4 py-2 rounded-full border border-gray-200">
+            <div className="mt-12 text-center animate-in fade-in-up duration-700 delay-500 relative z-10">
+              <div className="inline-flex items-center gap-2 bg-white/90 backdrop-blur-sm px-5 py-3 rounded-full border border-gray-200 shadow-md hover-lift">
                 <ShieldCheck className="text-green-600" size={20} />
                 <p className="text-xs font-black uppercase tracking-tighter text-gray-600">100% Secured by MistryLocal Trust</p>
               </div>
@@ -570,20 +739,20 @@ const App: React.FC = () => {
         )
       ) : (
         <>
-          <header className="px-5 py-4 bg-white border-b border-gray-100 sticky top-0 z-10">
+          <header className="px-5 py-4 bg-white/90 backdrop-blur-md border-b border-gray-100 sticky top-0 z-10 shadow-sm">
             <div className="flex justify-between items-center mb-3">
               <div>
-                <h1 className="text-xl font-bold text-amber-900 tracking-tight flex items-center gap-2">
+                <h1 className="text-xl font-bold text-amber-900 tracking-tight flex items-center gap-2 hover-lift">
                   Mistry<span className="text-orange-600">Local</span>
                 </h1>
-                <p className="text-[10px] text-gray-500 font-medium uppercase tracking-widest">{t('app_subtitle')}</p>
+                <p className="text-[10px] text-gray-500 font-medium uppercase tracking-widest mt-1">{t('app_subtitle')}</p>
               </div>
               <div className="flex gap-1.5">
                 {(['EN', 'HI', 'PA'] as Language[]).map(lang => (
                   <button
                     key={lang}
                     onClick={() => setLanguage(lang)}
-                    className={`w-7 h-7 rounded-full text-[8px] font-black transition-all flex items-center justify-center ${language === lang ? 'bg-amber-900 text-white' : 'bg-gray-100 text-gray-400'}`}
+                    className={`w-7 h-7 rounded-full text-[8px] font-black transition-all flex items-center justify-center hover:scale-110 ${language === lang ? 'bg-gradient-to-br from-amber-600 to-orange-600 text-white shadow-md' : 'bg-gray-100 text-gray-400 hover:bg-gray-200'}`}
                   >
                     {lang}
                   </button>
@@ -595,261 +764,121 @@ const App: React.FC = () => {
           <main className="flex-1 overflow-y-auto pb-24">
             <ErrorBoundary>
               {!user ? (
-                <div className="p-10 text-center text-gray-400 font-medium italic">User not authenticated</div>
+                <div className="p-10 text-center flex flex-col items-center justify-center min-h-[200px]">
+                  <div className="w-12 h-12 border-4 border-orange-200 border-t-orange-600 rounded-full animate-spin mb-4"></div>
+                  <p className="text-gray-400 font-medium italic">Loading your profile...</p>
+                </div>
               ) : user.role === AppRole.CUSTOMER ? (
                 activeTab === 'home' ? <CustomerHome onBook={addBooking} onCancel={cancelBookingRequest} onUpdateStatus={updateBookingStatus} carpenters={carpenters} bookings={bookings} t={t} user={user} /> :
-                activeTab === 'jobs' ? <MyBookings bookings={bookings} onUpdateStatus={updateBookingStatus} onRateBooking={handleRateBooking} t={t} /> :
+                activeTab === 'jobs' ? <MyBookings bookings={bookings} onUpdateStatus={updateBookingStatus} onRateBooking={handleRateBooking} t={t} user={user} /> :
                 activeTab === 'profile' ? (
                   <div className="p-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                     <h2 className="text-3xl font-black text-amber-900 mb-8">{t('profile')}</h2>
                     
-                    <div className="bg-gradient-to-br from-white to-orange-50/30 border border-orange-100 rounded-[2.5rem] p-8 mb-8 shadow-sm">
-                      <div className="flex items-center gap-4 mb-6">
-                        <div className="w-16 h-16 bg-orange-600 rounded-2xl flex items-center justify-center text-white shadow-lg">
-                          <User size={32} />
-                        </div>
-                        <div>
-                          <p className="text-[10px] font-black text-orange-600 uppercase tracking-widest mb-1">{t('customer_mode')}</p>
-                          <p className="text-2xl font-black text-amber-900 leading-tight">{user?.name || 'Guest'}</p>
-                          <p className="text-sm font-bold text-gray-400">{user?.phone || ''}</p>
-                        </div>
-                      </div>
-                      
-                      <div className="grid grid-cols-2 gap-3 pt-6 border-t border-gray-100">
-                        <div className="text-center p-3">
-                          <p className="text-lg font-black text-amber-900">{bookings.filter(b => b.status === JobStatus.COMPLETED).length}</p>
-                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">Fixes Done</p>
-                        </div>
-                        <div className="text-center p-3 border-l border-gray-100">
-                          <p className="text-lg font-black text-orange-600">4.9</p>
-                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">My Rating</p>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="space-y-4">
-
-
-                      <div className="p-6 bg-gray-50 rounded-[2rem] border border-gray-100">
-                        <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-4">Account Settings</p>
-                        <div className="space-y-4">
-                          <div className="flex items-center justify-between text-amber-900 font-bold text-sm">
-                            <span>Saved Addresses</span>
-                            <RefreshCcw size={16} className="text-gray-300" />
-                          </div>
-                          <div className="flex items-center justify-between text-amber-900 font-bold text-sm">
-                            <span>Payment Methods</span>
-                            <RefreshCcw size={16} className="text-gray-300" />
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="mt-12 flex flex-col items-center opacity-30 grayscale">
-                      <ShieldCheck className="text-green-600 mb-2" size={32} />
-                      <p className="text-[10px] font-black uppercase tracking-tighter">Verified by MistryLocal Trust</p>
-                    </div>
+                    <CustomerProfileEdit 
+                      customerProfile={customerProfile}
+                      user={user}
+                      onSaveProfile={async (updatedProfile) => {
+                        // Save profile to Firestore
+                        try {
+                          const { updateCustomerProfile } = await import('./services/bookingService');
+                          await updateCustomerProfile(user!.uid, updatedProfile as any);
+                          
+                          // Update local state
+                          setCustomerProfile(prev => prev ? { ...prev, ...updatedProfile } : null);
+                        } catch (error) {
+                          console.error('Error saving customer profile:', error);
+                          throw error; // Re-throw to handle in the component
+                        }
+                      }}
+                      onCancel={() => {}}
+                      t={t}
+                    />
                   </div>
-                ) : <div className="p-10 text-center text-gray-400 font-medium italic">Feature coming soon...</div>
+                ) : (
+                  <div className="p-10 text-center flex flex-col items-center justify-center min-h-[300px]">
+                    <div className="w-16 h-16 bg-gradient-to-br from-orange-100 to-amber-100 rounded-2xl flex items-center justify-center mb-4">
+                      <Star className="text-orange-600" size={32} />
+                    </div>
+                    <h3 className="text-xl font-black text-amber-900 mb-2">Coming Soon</h3>
+                    <p className="text-gray-400 font-medium max-w-xs">Exciting new features are on their way!</p>
+                  </div>
+                )
               ) : (
                 activeTab === 'home' ? <CarpenterPortal bookings={bookings} onUpdateStatus={updateBookingStatus} t={t} user={user} /> :
                 activeTab === 'jobs' ? (
-                  <div className="p-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                    <h2 className="text-3xl font-black text-amber-900 mb-8">My Bookings</h2>
-                    <div className="p-10 text-center text-gray-400 font-medium italic">
-                      View your accepted jobs and track their progress
-                    </div>
-                  </div>
+                  <MyBookings bookings={bookings} onUpdateStatus={updateBookingStatus} t={t} user={user} />
                 ) : activeTab === 'alerts' ? (
                   <div className="p-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
-                    <h2 className="text-3xl font-black text-amber-900 mb-8">Job Alerts</h2>
-                    <div className="p-10 text-center text-gray-400 font-medium italic">
-                      Notifications about new job opportunities
+                    <h2 className="text-3xl font-black text-amber-900 mb-8 flex items-center gap-3">
+                      <Bell className="text-orange-600" size={32} />
+                      Job Alerts
+                    </h2>
+                    <div className="p-10 text-center flex flex-col items-center justify-center min-h-[200px] bg-gradient-to-br from-orange-50 to-amber-50 rounded-3xl border border-orange-100">
+                      <Bell className="text-orange-400 mb-4" size={48} />
+                      <h3 className="text-lg font-black text-amber-900 mb-2">Stay Tuned</h3>
+                      <p className="text-gray-500 font-medium max-w-xs">Get notified about new job opportunities in your area</p>
                     </div>
                   </div>
                 ) : activeTab === 'profile' ? (
                   <div className="p-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
                     <h2 className="text-3xl font-black text-amber-900 mb-8">{t('profile')}</h2>
                     
-                    <div className="bg-white border-2 border-orange-50 rounded-[2.5rem] p-8 mb-8 shadow-sm">
-                      <div className="flex items-center gap-4 mb-6">
-                        <div className="relative">
-                          <img 
-                            src={carpenterProfile?.profilePhotoUrl ?? "https://picsum.photos/seed/carp3/200/200"} 
-                            className="w-20 h-20 rounded-2xl object-cover border-2 border-orange-100" 
-                            onError={(e) => {
-                              const target = e.target as HTMLImageElement;
-                              target.src = "https://picsum.photos/seed/carp3/200/200";
-                            }}
-                          />
-                          <div className="absolute -bottom-1 -right-1 bg-green-500 w-5 h-5 rounded-full border-2 border-white shadow-sm"></div>
-                        </div>
-                        <div>
-                          <p className="text-[10px] font-black text-orange-600 uppercase tracking-widest mb-1">{t('carpenter_mode')}</p>
-                          <p className="text-2xl font-black text-amber-900 leading-tight">{carpenterProfile?.name ?? user?.name ?? 'Carpenter Profile'}</p>
-                          <p className="text-sm font-bold text-gray-400">ID: ML-{(carpenterProfile?.id ?? '').substring(0, 4).toUpperCase() || 'XXXX'}</p>
-                        </div>
-                      </div>
-
-                      {/* BASIC CONTACT DETAILS */}
-                      {(carpenterProfile?.phone || carpenterProfile?.alternateMobileNumber) && (
-                        <div className="mt-4 p-3 bg-gray-50 rounded-2xl border border-gray-100">
-                          <p className="text-[10px] font-black uppercase text-gray-500 tracking-widest mb-2">Contact Information</p>
-                          <div className="text-xs text-amber-900 space-y-1">
-                            {carpenterProfile?.phone && (
-                              <div className="flex items-center gap-2">
-                                <span className="font-medium">Primary:</span>
-                                <span className="font-bold">{carpenterProfile.phone}</span>
-                              </div>
-                            )}
-                            {carpenterProfile?.alternateMobileNumber && (
-                              <div className="flex items-center gap-2">
-                                <span className="font-medium">Alternate:</span>
-                                <span className="font-bold">{carpenterProfile.alternateMobileNumber}</span>
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      )}
-
-                      {/* RATING & TRUST */}
-                      <div className="grid grid-cols-2 gap-3 pt-6 border-t border-gray-100">
-                        <div className="text-center p-3">
-                          <p className="text-lg font-black text-amber-900">{carpenterProfile?.jobsCompleted ?? 0}</p>
-                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">Jobs Completed</p>
-                        </div>
-                        <div className="text-center p-3 border-l border-gray-100">
-                          <p className="text-lg font-black text-orange-600">{typeof carpenterProfile?.rating === 'number' ? carpenterProfile.rating.toFixed(1) : '0.0'}</p>
-                          <p className="text-[10px] font-bold text-gray-400 uppercase tracking-tighter">Rating</p>
-                        </div>
-                      </div>
-                      
-                      {/* TRUST SCORE */}
-                      {carpenterProfile?.trustScore && carpenterProfile.trustScore > 0 && (
-                        <div className="mt-4 pt-4 border-t border-gray-100">
-                          <div className="flex items-center justify-between mb-2">
-                            <span className="text-[10px] font-black uppercase text-gray-500 tracking-widest">Trust Score</span>
-                            <span className="text-sm font-black text-green-600">{carpenterProfile.trustScore}%</span>
-                          </div>
-                          <div className="h-2 w-full bg-gray-200 rounded-full overflow-hidden">
-                            <div 
-                              className="h-full bg-green-500 rounded-full" 
-                              style={{ width: `${carpenterProfile.trustScore}%` }}
-                            ></div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* ADDRESS INFORMATION */}
-                    {carpenterProfile?.address && (
-                      <div className="p-6 bg-gray-50 rounded-[2rem] border border-gray-100 mb-4">
-                        <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-4">Address Information</p>
-                        <div className="text-xs text-amber-900 space-y-1">
-                          {carpenterProfile.address.line1 && <div>{carpenterProfile.address.line1}</div>}
-                          {carpenterProfile.address.line2 && <div>{carpenterProfile.address.line2}</div>}
-                          {carpenterProfile.address.area && <div>{carpenterProfile.address.area}</div>}
-                          {carpenterProfile.address.city && <div>{carpenterProfile.address.city}</div>}
-                          {carpenterProfile.address.state && <div>{carpenterProfile.address.state}</div>}
-                          {carpenterProfile.address.pincode && <div className="font-bold">Pincode: {carpenterProfile.address.pincode}</div>}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* ADDRESS PROOF */}
-                    {carpenterProfile?.addressProof && (
-                      <div className="p-6 bg-blue-50 rounded-[2rem] border border-blue-100 mb-4">
-                        <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest mb-4">Address Proof</p>
-                        <div className="text-xs text-blue-900 space-y-2">
-                          {carpenterProfile.addressProof.type && (
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium">Type:</span>
-                              <span className="font-bold bg-blue-100 px-2 py-1 rounded-md">{carpenterProfile.addressProof.type}</span>
-                            </div>
-                          )}
-                          {carpenterProfile.addressProof.documentNumber && (
-                            <div className="flex items-center gap-2">
-                              <span className="font-medium">Document:</span>
-                              <span className="font-bold">
-                                {'*' + '*'.repeat(Math.max(0, (carpenterProfile.addressProof.documentNumber?.length || 0) - 4)) + 
-                                (carpenterProfile.addressProof.documentNumber?.slice(-4) || '')}
-                              </span>
-                            </div>
-                          )}
-                          {carpenterProfile.addressProof.photoUrl && (
-                            <div className="mt-2">
-                              <span className="font-medium">Proof Photo:</span>
-                              <div className="mt-1 w-16 h-16 rounded-lg overflow-hidden border border-gray-200">
-                                <img 
-                                  src={carpenterProfile.addressProof.photoUrl} 
-                                  alt="Address Proof" 
-                                  className="w-full h-full object-cover"
-                                  onError={(e) => {
-                                    const target = e.target as HTMLImageElement;
-                                    target.style.display = 'none';
-                                  }}
-                                />
-                              </div>
-                            </div>
-                          )}
-                          {carpenterProfile.addressProof.verified && (
-                            <div className="flex items-center gap-1 mt-2">
-                              <ShieldCheck size={14} className="text-green-600" />
-                              <span className="text-green-700 font-bold text-xs">Verified</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="space-y-4">
-                      <div className="p-6 bg-gray-50 rounded-[2rem] border border-gray-100">
-                        <p className="text-[10px] font-black text-gray-400 uppercase tracking-widest mb-4">Earnings & Wallet</p>
-                        <div className="space-y-4">
-                          <div className="flex items-center justify-between text-amber-900 font-bold text-sm">
-                            <span>Weekly Earnings</span>
-                            <span className="text-green-600">₹{(carpenterProfile?.weeklyEarnings ?? 0).toLocaleString()}</span>
-                          </div>
-                          <div className="flex items-center justify-between text-amber-900 font-bold text-sm">
-                            <span>Current Balance</span>
-                            <span className="text-amber-900">₹{(carpenterProfile?.walletBalance ?? 0).toLocaleString()}</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="mt-12 flex flex-col items-center opacity-30 grayscale">
-                      <Star className="text-orange-600 mb-2" size={32} />
-                      <p className="text-[10px] font-black uppercase tracking-tighter">Verified Top Professional</p>
-                    </div>
+                    <CarpenterProfileEdit 
+                      carpenterProfile={carpenterProfile}
+                      user={user}
+                      onSaveProfile={async (updatedProfile) => {
+                        // Save profile to Firestore
+                        try {
+                          const { updateCarpenterProfile } = await import('./services/bookingService');
+                          await updateCarpenterProfile(user!.uid, updatedProfile as any);
+                          
+                          // Update local state
+                          setCarpenterProfile(prev => prev ? { ...prev, ...updatedProfile } : null);
+                        } catch (error) {
+                          console.error('Error saving profile:', error);
+                          throw error; // Re-throw to handle in the component
+                        }
+                      }}
+                      onCancel={() => {}}
+                      t={t}
+                    />
                   </div>
-                ) : <div className="p-10 text-center text-gray-400 font-medium italic">Feature coming soon...</div>
+                ) : (
+                  <div className="p-10 text-center flex flex-col items-center justify-center min-h-[300px]">
+                    <div className="w-16 h-16 bg-gradient-to-br from-amber-100 to-orange-100 rounded-2xl flex items-center justify-center mb-4">
+                      <Star className="text-amber-600" size={32} />
+                    </div>
+                    <h3 className="text-xl font-black text-amber-900 mb-2">Coming Soon</h3>
+                    <p className="text-gray-400 font-medium max-w-xs">New features for mistry professionals arriving soon!</p>
+                  </div>
+                )
               )}
             </ErrorBoundary>
           </main>
         </>
       )}
 
-      <nav className="fixed bottom-0 left-0 right-0 max-w-[480px] mx-auto bg-white border-t border-gray-100 px-6 py-3 flex justify-between items-center z-20 shadow-[0_-4px_10px_rgba(0,0,0,0.02)]">
-        <button onClick={() => setActiveTab('home')} className={`flex flex-col items-center gap-1 transition-colors ${activeTab === 'home' ? 'text-orange-600' : 'text-gray-400'}`}>
-          <Home size={22} />
+      <nav className="fixed bottom-0 left-0 right-0 max-w-[480px] mx-auto bg-white/95 backdrop-blur-md border-t border-gray-100 px-6 py-3 flex justify-between items-center z-20 shadow-[0_-6px_20px_rgba(0,0,0,0.05)] rounded-t-2xl">
+        <button onClick={() => setActiveTab('home')} className={`flex flex-col items-center gap-1 transition-all duration-200 hover:scale-105 ${activeTab === 'home' ? 'text-orange-600 scale-110' : 'text-gray-400'}`}>
+          <Home size={22} className={`${activeTab === 'home' ? 'drop-shadow-[0_0_8px_rgba(249,115,22,0.4)]' : ''}`} />
           <span className="text-[10px] font-medium">{t('home')}</span>
         </button>
-        <button onClick={() => setActiveTab('jobs')} className={`flex flex-col items-center gap-1 transition-colors ${activeTab === 'jobs' ? 'text-orange-600' : 'text-gray-400'}`}>
-          <Briefcase size={22} />
+        <button onClick={() => setActiveTab('jobs')} className={`flex flex-col items-center gap-1 transition-all duration-200 hover:scale-105 ${activeTab === 'jobs' ? 'text-orange-600 scale-110' : 'text-gray-400'}`}>
+          <Briefcase size={22} className={`${activeTab === 'jobs' ? 'drop-shadow-[0_0_8px_rgba(249,115,22,0.4)]' : ''}`} />
           <span className="text-[10px] font-medium">{user && user.role === AppRole.CUSTOMER ? t('bookings') : 'My Jobs'}</span>
         </button>
-        <button onClick={() => setActiveTab('alerts')} className={`flex flex-col items-center gap-1 transition-colors ${activeTab === 'alerts' ? 'text-orange-600' : 'text-gray-400'}`}>
+        <button onClick={() => setActiveTab('alerts')} className={`flex flex-col items-center gap-1 transition-all duration-200 hover:scale-105 ${activeTab === 'alerts' ? 'text-orange-600 scale-110' : 'text-gray-400'}`}>
           <div className="relative">
-            <Bell size={22} />
+            <Bell size={22} className={`${activeTab === 'alerts' ? 'drop-shadow-[0_0_8px_rgba(249,115,22,0.4)]' : ''}`} />
             {user && user.role === AppRole.CARPENTER && bookings.some(b => b.status === JobStatus.SEARCHING) && (
-              <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-orange-600 rounded-full border-2 border-white"></div>
+              <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-orange-600 rounded-full border-2 border-white animate-pulse"></div>
             )}
           </div>
           <span className="text-[10px] font-medium">{t('alerts')}</span>
         </button>
-        <button onClick={() => setActiveTab('profile')} className={`flex flex-col items-center gap-1 transition-colors ${activeTab === 'profile' ? 'text-orange-600' : 'text-gray-400'}`}>
-          <User size={22} />
+        <button onClick={() => setActiveTab('profile')} className={`flex flex-col items-center gap-1 transition-all duration-200 hover:scale-105 ${activeTab === 'profile' ? 'text-orange-600 scale-110' : 'text-gray-400'}`}>
+          <User size={22} className={`${activeTab === 'profile' ? 'drop-shadow-[0_0_8px_rgba(249,115,22,0.4)]' : ''}`} />
           <span className="text-[10px] font-medium">{t('profile')}</span>
         </button>
       </nav>

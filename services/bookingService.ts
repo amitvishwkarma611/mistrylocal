@@ -166,6 +166,17 @@ export interface CarpenterData {
   rating: number;
   serviceAreas: string[]; // Added for area-based matching
   
+  // FIELDS FROM Carpenter INTERFACE
+  verified?: boolean;
+  distance?: string;
+  specialties?: string[];
+  acceptsSmallJobs?: boolean;
+  image?: string;
+  lat?: number;
+  lng?: number;
+  trustScore?: number;
+  recentTags?: string[];
+  
   // NEW PROFESSIONAL DETAILS (optional)
   alternateMobileNumber?: string;
   address?: {
@@ -186,6 +197,9 @@ export interface CarpenterData {
   createdAt?: any; // Firestore Timestamp
   updatedAt?: any; // Firestore Timestamp
   
+  // STATS DATA (may not exist in current documents)
+  jobsCompleted?: number;
+  ratingCount?: number;
   // EARNINGS DATA (may not exist in current documents)
   weeklyEarnings?: number;
   walletBalance?: number;
@@ -968,22 +982,38 @@ export const getWaveForBooking = (createdAt: any): number => {
 // Removed listenForCarpenterStatus - handled by direct queries
 
 /**
- * Creates or updates a carpenter's profile in Firestore
- * QUOTA-SAFE: Single setDoc call - must be called ONLY ONCE per login
+ * Creates a carpenter's profile in Firestore if it doesn't exist
+ * QUOTA-SAFE: Conditional setDoc call - creates only if document doesn't exist
  * @param carpenterData - Carpenter information
  */
 export const createOrUpdateCarpenter = async (carpenterData: Omit<CarpenterData, 'id'> & { id: string }): Promise<void> => {
   return executeWriteOperation(`create_carpenter_${carpenterData.id}`, async () => {
     try {
       const carpenterRef = doc(db, 'carpenters', carpenterData.id);
-      // SINGLE write - no retries, no loops
-      await setDoc(carpenterRef, {
-        ...carpenterData,
-        createdAt: serverTimestamp(),
-        updatedAt: serverTimestamp()
-      });
       
-      console.log(`Carpenter ${carpenterData.id} profile created/updated`);
+      // Check if document exists
+      const docSnap = await getDoc(carpenterRef);
+      
+      if (!docSnap.exists()) {
+        // Only create the document if it doesn't exist
+        await setDoc(carpenterRef, {
+          ...carpenterData,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp()
+        });
+        
+        console.log(`Carpenter ${carpenterData.id} profile created`);
+      } else {
+        // If document exists, just update the online status and services
+        await updateDoc(carpenterRef, {
+          online: carpenterData.online,
+          services: carpenterData.services,
+          serviceAreas: carpenterData.serviceAreas,
+          updatedAt: serverTimestamp()
+        });
+        
+        console.log(`Carpenter ${carpenterData.id} profile exists, updated online status and services`);
+      }
     } catch (error) {
       console.error('Error creating/updating carpenter profile:', error);
       throw error;
@@ -1183,5 +1213,72 @@ export const subscribeToUserBookings = (
  * - No more status == "SEARCHING" global queries
  * - No more repeated listener attachment/cleanup cycles
  * - No more batchGet storms from multiple clients
- * - Each carpenter maintains exactly ONE listener
+ * Each carpenter maintains exactly ONE listener
  */
+
+/**
+ * Updates a carpenter's profile in Firestore
+ * QUOTA-SAFE: Single updateDoc call
+ * @param carpenterId - Unique carpenter ID
+ * @param updatedFields - Fields to update in the carpenter profile
+ */
+export const updateCarpenterProfile = async (carpenterId: string, updatedFields: Partial<CarpenterData>): Promise<void> => {
+  return executeWriteOperation(`update_carpenter_profile_${carpenterId}`, async () => {
+    try {
+      const carpenterRef = doc(db, 'carpenters', carpenterId);
+      // Prepare update data without id and remove undefined values
+      const updateData: any = {};
+      
+      // Copy fields but exclude undefined values and id
+      Object.keys(updatedFields).forEach(key => {
+        const value = (updatedFields as any)[key];
+        if (value !== undefined && key !== 'id') {
+          updateData[key] = value;
+        }
+      });
+      
+      updateData.updatedAt = serverTimestamp();
+      
+      await updateDoc(carpenterRef, updateData);
+      
+      console.log(`Carpenter ${carpenterId} profile updated with fields:`, Object.keys(updateData));
+    } catch (error) {
+      console.error('Error updating carpenter profile:', error);
+      throw error;
+    }
+  });
+};
+
+/**
+ * Updates a customer's profile in Firestore
+ * QUOTA-SAFE: Single setDoc call with merge
+ * @param customerId - Unique customer ID
+ * @param updatedFields - Fields to update in the customer profile
+ */
+export const updateCustomerProfile = async (customerId: string, updatedFields: Partial<any>): Promise<void> => {
+  return executeWriteOperation(`update_customer_profile_${customerId}`, async () => {
+    try {
+      const customerRef = doc(db, 'customers', customerId);
+      // Prepare update data without id and remove undefined values
+      const updateData: any = {};
+      
+      // Copy fields but exclude undefined values and id
+      Object.keys(updatedFields).forEach(key => {
+        const value = (updatedFields as any)[key];
+        if (value !== undefined && key !== 'id') {
+          updateData[key] = value;
+        }
+      });
+      
+      updateData.updatedAt = serverTimestamp();
+      
+      // Use setDoc with merge: true to create document if it doesn't exist
+      await setDoc(customerRef, updateData, { merge: true });
+      
+      console.log(`Customer ${customerId} profile updated with fields:`, Object.keys(updateData));
+    } catch (error) {
+      console.error('Error updating customer profile:', error);
+      throw error;
+    }
+  });
+};

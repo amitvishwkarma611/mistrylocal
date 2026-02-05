@@ -218,6 +218,7 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
       b.status !== JobStatus.COMPLETED && 
       b.status !== JobStatus.CANCELLED && 
       b.status !== JobStatus.SEARCHING && 
+      b.status !== JobStatus.ACCEPT_TIMEOUT &&
       b.mistryId === user?.uid
     );
   }, [bookings, user?.uid]);
@@ -248,6 +249,12 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
       .sort((a, b) => b.createdAt - a.createdAt);
   }, [bookings, user?.uid]);
 
+  // Filter timeout jobs for this specific carpenter
+  const timeoutJobs = useMemo(() => {
+    return bookings.filter(b => b.status === JobStatus.ACCEPT_TIMEOUT && b.mistryId === user?.uid)
+      .sort((a, b) => b.createdAt - a.createdAt);
+  }, [bookings, user?.uid]);
+
   const totalEarned = useMemo(() => {
     return completedJobs.reduce((acc, job) => {
       const priceStr = job.price?.replace('₹', '').replace(',', '') || '0';
@@ -275,15 +282,6 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
               </span>
               <span className="text-[10px] font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded uppercase tracking-wider">{t('online')}</span>
             </div>
-            {carpenterProfile?.phone && (
-              <div className="flex items-center gap-1.5 mt-1 text-[10px] text-gray-500">
-                <Phone size={12} />
-                <span>{carpenterProfile.phone}</span>
-                {carpenterProfile.alternateMobileNumber && (
-                  <span className="ml-2">| {carpenterProfile.alternateMobileNumber}</span>
-                )}
-              </div>
-            )}
           </div>
         </div>
 
@@ -296,69 +294,6 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
             <div className="h-full bg-orange-600" style={{ width: `${carpenterProfile?.trustScore || 92}%` }}></div>
           </div>
         </div>
-
-        {/* Display address information if available */}
-        {carpenterProfile?.address && (
-          <div className="mt-4 p-3 bg-gray-50 rounded-2xl border border-gray-100">
-            <p className="text-[10px] font-black uppercase text-gray-500 tracking-widest mb-2">Address</p>
-            <div className="text-xs text-amber-900">
-              {carpenterProfile.address.line1 && <div>{carpenterProfile.address.line1}</div>}
-              {carpenterProfile.address.line2 && <div>{carpenterProfile.address.line2}</div>}
-              {carpenterProfile.address.area && <div>{carpenterProfile.address.area}</div>}
-              {carpenterProfile.address.city && <div>{carpenterProfile.address.city}</div>}
-              {carpenterProfile.address.state && <div>{carpenterProfile.address.state}</div>}
-              {carpenterProfile.address.pincode && <div>Pincode: {carpenterProfile.address.pincode}</div>}
-            </div>
-          </div>
-        )}
-
-        {/* Display address proof information if available */}
-        {carpenterProfile?.addressProof && (
-          <div className="mt-3 p-3 bg-blue-50 rounded-2xl border border-blue-100">
-            <p className="text-[10px] font-black uppercase text-blue-600 tracking-widest mb-2">Address Proof</p>
-            <div className="text-xs text-blue-900 space-y-1">
-              {carpenterProfile.addressProof.type && (
-                <div className="flex items-center gap-2">
-                  <span className="font-medium">Type:</span>
-                  <span className="font-bold">{carpenterProfile.addressProof.type}</span>
-                </div>
-              )}
-              {carpenterProfile.addressProof.documentNumber && (
-                <div className="flex items-center gap-2">
-                  <span className="font-medium">Document:</span>
-                  <span className="font-bold">
-                    {'*' + '*'.repeat(Math.max(0, (carpenterProfile.addressProof.documentNumber?.length || 0) - 4)) + 
-                    (carpenterProfile.addressProof.documentNumber?.slice(-4) || '')}
-                  </span>
-                </div>
-              )}
-              {carpenterProfile.addressProof.photoUrl && (
-                <div className="mt-2">
-                  <span className="font-medium">Proof Photo:</span>
-                  <div className="mt-1 w-16 h-16 rounded-lg overflow-hidden border border-gray-200">
-                    <img 
-                      src={carpenterProfile.addressProof.photoUrl} 
-                      alt="Address Proof" 
-                      className="w-full h-full object-cover"
-                      onError={(e) => {
-                        const target = e.target as HTMLImageElement;
-                        target.src = 'https://placehold.co/64x64/e2e8f0/64748b?text=Doc';
-                      }}
-                    />
-                  </div>
-                </div>
-              )}
-              {carpenterProfile.addressProof.verified !== undefined && (
-                <div className="mt-2">
-                  <span className="font-medium">Status:</span>
-                  <span className={`ml-2 px-2 py-0.5 rounded-full text-[9px] font-bold ${carpenterProfile.addressProof.verified ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-                    {carpenterProfile.addressProof.verified ? 'Verified' : 'Not Verified'}
-                  </span>
-                </div>
-              )}
-            </div>
-          </div>
-        )}
       </div>
 
       {activeOffer && (
@@ -455,25 +390,50 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
               </div>
               <div className="flex flex-col gap-3">
                 {currentJob.status === JobStatus.ACCEPTED && (
-                  <button 
-                    onClick={async () => {
-                      console.log('🚗 Clicked Start Navigation for job:', currentJob.id);
-                      if (isNavigating) return;
-                      setIsNavigating(true);
-                      try {
-                        await onUpdateStatus(currentJob.id, JobStatus.ON_THE_WAY);
-                        console.log('✅ Navigation started successfully');
-                      } catch (error) {
-                        console.error('❌ Error starting navigation:', error);
-                      } finally {
-                        setIsNavigating(false);
-                      }
-                    }} 
-                    disabled={isNavigating}
-                    className="w-full py-4 bg-orange-600 text-white rounded-2xl font-bold text-sm shadow-md flex items-center justify-center gap-2 active:scale-95 transition-all hover:bg-orange-700 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <Navigation size={18} /> {isNavigating ? 'Updating...' : t('start_nav')}
-                  </button>
+                  <div className="flex flex-col gap-3">
+                    <div className="flex gap-2">
+                      <button 
+                        onClick={() => {
+                          // Open WhatsApp to customer
+                          const customerPhone = currentJob.customerPhone || '';
+                          const message = encodeURIComponent(`Hi, I'm on my way to complete your ${currentJob.service} job. ETA: 15-20 mins.`);
+                          window.open(`https://wa.me/${customerPhone}?text=${message}`, '_blank');
+                        }}
+                        className="flex-1 py-3 bg-green-500 text-white rounded-2xl font-bold text-xs flex items-center justify-center gap-2 active:scale-95 transition-all hover:bg-green-600"
+                      >
+                        <MessageSquare size={14} /> WhatsApp
+                      </button>
+                      <button 
+                        onClick={() => {
+                          // Call customer
+                          const customerPhone = currentJob.customerPhone || '';
+                          window.open(`tel:${customerPhone}`);
+                        }}
+                        className="flex-1 py-3 bg-blue-500 text-white rounded-2xl font-bold text-xs flex items-center justify-center gap-2 active:scale-95 transition-all hover:bg-blue-600"
+                      >
+                        <Phone size={14} /> Call
+                      </button>
+                    </div>
+                    <button 
+                      onClick={async () => {
+                        console.log('🚗 Clicked Start Navigation for job:', currentJob.id);
+                        if (isNavigating) return;
+                        setIsNavigating(true);
+                        try {
+                          await onUpdateStatus(currentJob.id, JobStatus.ON_THE_WAY);
+                          console.log('✅ Navigation started successfully');
+                        } catch (error) {
+                          console.error('❌ Error starting navigation:', error);
+                        } finally {
+                          setIsNavigating(false);
+                        }
+                      }} 
+                      disabled={isNavigating}
+                      className="w-full py-4 bg-orange-600 text-white rounded-2xl font-bold text-sm shadow-md flex items-center justify-center gap-2 active:scale-95 transition-all hover:bg-orange-700 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <Navigation size={18} /> {isNavigating ? 'Updating...' : t('start_nav')}
+                    </button>
+                  </div>
                 )}
                 {currentJob.status === JobStatus.ON_THE_WAY && (
                    <div className="flex flex-col gap-3 animate-in slide-in-from-top-4 duration-300">
@@ -577,7 +537,7 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
         
         {completedJobs.length > 0 ? (
           <div className="space-y-3">
-            {completedJobs.map(job => (
+            {completedJobs.slice(0, 3).map(job => (
               <div key={job.id} className="bg-white border border-gray-100 rounded-2xl p-4 flex items-center justify-between shadow-sm group hover:border-orange-200 transition-all">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 bg-green-50 rounded-xl flex items-center justify-center text-green-600">
@@ -596,6 +556,20 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
                 </div>
               </div>
             ))}
+            {completedJobs.length > 3 && (
+              <div className="pt-3">
+                <button 
+                  onClick={() => {
+                    // Dispatch event to switch to 'jobs' tab in parent component
+                    const event = new CustomEvent('switchTab', { detail: 'jobs' });
+                    window.dispatchEvent(event);
+                  }}
+                  className="w-full py-3 bg-orange-100 text-orange-700 rounded-2xl font-bold text-sm flex items-center justify-center gap-2 hover:bg-orange-200 transition-colors"
+                >
+                  Show More <ChevronRight size={16} />
+                </button>
+              </div>
+            )}
           </div>
         ) : (
           <div className="p-8 text-center bg-gray-50 rounded-3xl border border-dashed border-gray-200">
@@ -604,6 +578,38 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
         )}
       </div>
       
+      {/* Timeout Jobs Section */}
+      {timeoutJobs.length > 0 && (
+        <div className="mb-8">
+          <div className="flex items-center justify-between mb-4 px-1">
+            <h3 className="text-lg font-black text-amber-900 flex items-center gap-2">
+              <AlertCircle size={20} className="text-orange-500" />
+              Timeout Jobs
+            </h3>
+          </div>
+          
+          <div className="space-y-3 mb-6">
+            {timeoutJobs.map(job => (
+              <div key={job.id} className="bg-orange-50 border border-orange-200 rounded-2xl p-4 flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 bg-orange-100 rounded-xl flex items-center justify-center text-orange-600">
+                    <AlertCircle size={20} />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-bold text-amber-900 leading-tight">{job.service}</h4>
+                    <p className="text-[10px] text-orange-600 font-medium mt-0.5">Timeout - No response</p>
+                  </div>
+                </div>
+                <div className="text-right">
+                  <p className="text-sm font-black text-orange-600">₹{job.price?.replace('₹', '') || '0'}</p>
+                  <p className="text-[8px] font-black text-orange-400 uppercase tracking-tighter">No Earnings</p>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
       {/* Cancelled Jobs Section */}
       {cancelledJobs.length > 0 && (
         <div className="mb-8">

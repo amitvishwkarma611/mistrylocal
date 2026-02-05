@@ -9,9 +9,10 @@ interface MyBookingsProps {
   onUpdateStatus: (id: string, status: JobStatus) => void;
   onRateBooking: (id: string, rating: number, tags: string[]) => void;
   t: (key: keyof typeof translations.EN) => string;
+  user?: { role: any; name: string; phone: string; uid: string };
 }
 
-const MyBookings: React.FC<MyBookingsProps> = ({ bookings, onUpdateStatus, onRateBooking, t }) => {
+const MyBookings: React.FC<MyBookingsProps> = ({ bookings, onUpdateStatus, onRateBooking, t, user }) => {
   const [ratingDraft, setRatingDraft] = useState<{ [key: string]: { value: number, tags: string[] } }>({});
 
   const handleStarClick = (bookingId: string, value: number) => {
@@ -26,15 +27,21 @@ const MyBookings: React.FC<MyBookingsProps> = ({ bookings, onUpdateStatus, onRat
   };
 
   const openWhatsApp = (booking: Booking) => {
-    const phone = booking.mistryId || ""; // Use the actual carpenter's phone number
+    const phone = booking.mistryPhone || booking.mistryId || ""; // Use the actual carpenter's phone number
     const message = encodeURIComponent(`Hello, I have a booking for ${booking.service} at ${booking.address}. Status: ${booking.status}.`);
     window.open(`https://wa.me/${phone}?text=${message}`, '_blank');
+  };
+
+  const makeCall = (booking: Booking) => {
+    const phone = booking.mistryPhone || booking.mistryId || ""; // Use the actual carpenter's phone number
+    window.open(`tel:${phone}`);
   };
 
   const activeBookings = bookings.filter(b => 
     b.status !== JobStatus.COMPLETED && 
     b.status !== JobStatus.CANCELLED && 
-    b.status !== JobStatus.SEARCHING
+    b.status !== JobStatus.SEARCHING &&
+    b.status !== JobStatus.ACCEPT_TIMEOUT
   );
   
   // Recently accepted jobs - REMOVED AS PER USER REQUEST
@@ -43,11 +50,16 @@ const MyBookings: React.FC<MyBookingsProps> = ({ bookings, onUpdateStatus, onRat
   // );
 
   const pendingRating = bookings.filter(b => 
-    b.status === JobStatus.COMPLETED && !b.ratingSubmitted
+    b.status === JobStatus.COMPLETED && (b.ratingSubmitted === false || b.ratingSubmitted === undefined)
   );
 
   const historyBookings = bookings.filter(b => 
-    b.status === JobStatus.COMPLETED && b.ratingSubmitted
+    b.status === JobStatus.COMPLETED && b.ratingSubmitted === true
+  ).sort((a, b) => b.createdAt - a.createdAt);
+
+  // Filter timeout bookings for history
+  const timeoutBookings = bookings.filter(b => 
+    b.status === JobStatus.ACCEPT_TIMEOUT
   ).sort((a, b) => b.createdAt - a.createdAt);
 
   return (
@@ -109,7 +121,8 @@ const MyBookings: React.FC<MyBookingsProps> = ({ bookings, onUpdateStatus, onRat
           </div>
         )} */}
         
-        {/* ACTIVE PROGRESS */}
+        {/* ACTIVE PROGRESS - HIDDEN FOR CARPENTERS */}
+        {user?.role !== 'CARPENTER' && (
         <div>
           <h3 className="text-[10px] font-black uppercase tracking-widest text-orange-600 mb-3 flex items-center gap-2">
             <Clock size={12} /> {t('live_progress')}
@@ -191,7 +204,10 @@ const MyBookings: React.FC<MyBookingsProps> = ({ bookings, onUpdateStatus, onRat
                     >
                       <MessageSquare size={14} /> WhatsApp
                     </button>
-                    <button className="flex-1 py-3 border border-gray-100 text-amber-900 rounded-2xl font-bold text-xs active:scale-95 transition-all">
+                    <button 
+                      onClick={() => makeCall(booking)}
+                      className="flex-1 py-3 border border-gray-100 text-amber-900 rounded-2xl font-bold text-xs active:scale-95 transition-all"
+                    >
                       <Phone size={14} className="inline mr-1" /> Call
                     </button>
                   </div>
@@ -201,9 +217,10 @@ const MyBookings: React.FC<MyBookingsProps> = ({ bookings, onUpdateStatus, onRat
             )}
           </div>
         </div>
+        )}
 
-        {/* PENDING RATINGS */}
-        {pendingRating.length > 0 && (
+        {/* PENDING RATINGS - HIDDEN FOR CARPENTERS */}
+        {user?.role !== 'CARPENTER' && pendingRating.length > 0 && (
           <div>
             <h3 className="text-[10px] font-black uppercase tracking-widest text-green-600 mb-3 flex items-center gap-2">
               <CheckCircle2 size={12} className="text-green-500" /> Work Completed - Please Rate
@@ -239,6 +256,40 @@ const MyBookings: React.FC<MyBookingsProps> = ({ bookings, onUpdateStatus, onRat
                 </button>
               </div>
             ))}
+          </div>
+        )}
+
+        {/* TIMEOUT JOBS SECTION */}
+        {timeoutBookings.length > 0 && (
+          <div>
+            <h3 className="text-[10px] font-black uppercase tracking-widest text-red-600 mb-3 flex items-center gap-2">
+              <AlertCircle size={12} className="text-red-500" /> Timeout Jobs
+            </h3>
+            <div className="flex flex-col gap-2 mb-6">
+              {timeoutBookings.map(job => (
+                <div key={job.id} className="bg-red-50 border border-red-200 rounded-xl p-3 flex items-center justify-between shadow-xs group hover:border-red-300 transition-all">
+                  <div className="flex items-center gap-2 flex-1 overflow-hidden">
+                    <div className="w-8 h-8 bg-red-100 rounded-lg flex items-center justify-center text-red-600 shrink-0">
+                      <AlertCircle size={16} />
+                    </div>
+                    <div className="overflow-hidden">
+                      <h4 className="text-sm font-bold text-amber-900 leading-tight truncate">{job.service}</h4>
+                      <div className="flex items-center gap-2 mt-0.5">
+                        <p className="text-[10px] text-red-600 font-medium">Timeout - No response from mistry</p>
+                        <span className="text-[10px] text-gray-300">•</span>
+                        <p className="text-[10px] text-gray-400 font-medium">{job.time}</p>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="text-right shrink-0 ml-3">
+                    <p className="text-sm font-black text-red-600 flex items-center justify-end gap-0.5">
+                      {job.price}
+                    </p>
+                    <p className="text-[8px] font-black text-red-400 uppercase tracking-tighter mt-0.5">No Charge</p>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

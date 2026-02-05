@@ -74,11 +74,26 @@ export interface Carpenter {
   walletBalance?: number;
 }
 
+export interface Customer {
+  id: string;
+  name: string;
+  phone: string;
+  email?: string;
+  address?: Address;
+  profilePhotoUrl?: string;
+  registrationDate?: any; // Firestore Timestamp
+  lastActive?: any; // Firestore Timestamp
+  totalBookings?: number;
+  rating?: number;
+}
+
 export interface Booking {
   id: string;
   service: string;
   mistry: string;
   mistryId?: string;
+  mistryPhone?: string;
+  customerPhone?: string;
   status: JobStatus;
   time: string;
   address: string;

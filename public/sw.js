@@ -1,4 +1,4 @@
-const CACHE_NAME = 'mistrylocal-v1';
+const CACHE_NAME = 'mistrylocal-v2';
 const urlsToCache = [
   '/',
   '/index.html',
@@ -21,15 +21,9 @@ self.addEventListener('install', (event) => {
 
 self.addEventListener('fetch', (event) => {
   event.respondWith(
-    caches.match(event.request)
-      .then((response) => {
-        // Return cached version if available, otherwise fetch from network
-        if (response) {
-          return response;
-        }
-        return fetch(event.request);
-      }
-    )
+    fetch(event.request)
+      .then(response => response)
+      .catch(() => caches.match(event.request))
   );
 });
 
@@ -37,12 +31,12 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((cacheNames) => {
       return Promise.all(
-        cacheNames.map((cacheName) => {
-          if (cacheName !== CACHE_NAME) {
+        cacheNames
+          .filter(cacheName => cacheName !== CACHE_NAME)
+          .map(cacheName => {
             console.log('Deleting old cache:', cacheName);
             return caches.delete(cacheName);
-          }
-        })
+          })
       );
     })
   );

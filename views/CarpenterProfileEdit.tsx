@@ -99,6 +99,8 @@ const CarpenterProfileEdit: React.FC<CarpenterProfileEditProps> = ({
     try {
       const cleanedProfile = cleanProfileData(editedProfile);
       await onSaveProfile(cleanedProfile);
+      // Update local editedProfile state with saved data
+      setEditedProfile(prev => ({ ...prev, ...cleanedProfile }));
       setIsEditing(false);
     } catch (error) {
       console.error('Error saving profile:', error);
@@ -113,7 +115,7 @@ const CarpenterProfileEdit: React.FC<CarpenterProfileEditProps> = ({
         <div className="flex items-center gap-4">
           <div className="relative">
             <img 
-              src={editedProfile.profilePhotoUrl ?? "https://picsum.photos/seed/carp3/200/200"} 
+              src={editedProfile.profilePhotoUrl ?? carpenterProfile?.profilePhotoUrl ?? "https://picsum.photos/seed/carp3/200/200"} 
               className="w-20 h-20 rounded-2xl object-cover border-2 border-orange-100" 
               onError={(e) => {
                 const target = e.target as HTMLImageElement;
@@ -136,7 +138,7 @@ const CarpenterProfileEdit: React.FC<CarpenterProfileEditProps> = ({
               />
             ) : (
               <p className="text-2xl font-black text-amber-900 leading-tight">
-                {carpenterProfile?.name ?? user?.name ?? 'Carpenter Profile'}
+                {editedProfile.name ?? carpenterProfile?.name ?? user?.name ?? 'Carpenter Profile'}
               </p>
             )}
             <p className="text-sm font-bold text-gray-400">ID: ML-{(carpenterProfile?.id ?? '').substring(0, 4).toUpperCase() || 'XXXX'}</p>
@@ -200,16 +202,16 @@ const CarpenterProfileEdit: React.FC<CarpenterProfileEditProps> = ({
             </>
           ) : (
             <>
-              {carpenterProfile?.phone && (
+              {(editedProfile.phone ?? carpenterProfile?.phone) && (
                 <div className="flex items-center gap-2">
                   <Phone size={12} className="text-gray-500" />
-                  <span className="font-bold">{carpenterProfile.phone}</span>
+                  <span className="font-bold">{editedProfile.phone ?? carpenterProfile?.phone}</span>
                 </div>
               )}
-              {carpenterProfile?.alternateMobileNumber && (
+              {(editedProfile.alternateMobileNumber ?? carpenterProfile?.alternateMobileNumber) && (
                 <div className="flex items-center gap-2">
                   <Phone size={12} className="text-gray-500" />
-                  <span className="font-bold">{carpenterProfile.alternateMobileNumber}</span>
+                  <span className="font-bold">{editedProfile.alternateMobileNumber ?? carpenterProfile?.alternateMobileNumber}</span>
                 </div>
               )}
             </>
@@ -272,12 +274,12 @@ const CarpenterProfileEdit: React.FC<CarpenterProfileEditProps> = ({
           </div>
         ) : (
           <div className="text-xs text-amber-900 space-y-1">
-            {carpenterProfile?.address?.line1 && <div>{carpenterProfile.address.line1}</div>}
-            {carpenterProfile?.address?.line2 && <div>{carpenterProfile.address.line2}</div>}
-            {carpenterProfile?.address?.area && <div>{carpenterProfile.address.area}</div>}
-            {carpenterProfile?.address?.city && <div>{carpenterProfile.address.city}</div>}
-            {carpenterProfile?.address?.state && <div>{carpenterProfile.address.state}</div>}
-            {carpenterProfile?.address?.pincode && <div className="font-bold">Pincode: {carpenterProfile.address.pincode}</div>}
+            {(editedProfile.address?.line1 ?? carpenterProfile?.address?.line1) && <div>{editedProfile.address?.line1 ?? carpenterProfile?.address?.line1}</div>}
+            {(editedProfile.address?.line2 ?? carpenterProfile?.address?.line2) && <div>{editedProfile.address?.line2 ?? carpenterProfile?.address?.line2}</div>}
+            {(editedProfile.address?.area ?? carpenterProfile?.address?.area) && <div>{editedProfile.address?.area ?? carpenterProfile?.address?.area}</div>}
+            {(editedProfile.address?.city ?? carpenterProfile?.address?.city) && <div>{editedProfile.address?.city ?? carpenterProfile?.address?.city}</div>}
+            {(editedProfile.address?.state ?? carpenterProfile?.address?.state) && <div>{editedProfile.address?.state ?? carpenterProfile?.address?.state}</div>}
+            {(editedProfile.address?.pincode ?? carpenterProfile?.address?.pincode) && <div className="font-bold">Pincode: {editedProfile.address?.pincode ?? carpenterProfile?.address?.pincode}</div>}
           </div>
         )}
       </div>
@@ -318,27 +320,27 @@ const CarpenterProfileEdit: React.FC<CarpenterProfileEditProps> = ({
           </div>
         ) : (
           <div className="text-xs text-blue-900 space-y-2">
-            {carpenterProfile?.addressProof?.type && (
+            {(editedProfile.addressProof?.type ?? carpenterProfile?.addressProof?.type) && (
               <div className="flex items-center gap-2">
                 <span className="font-medium">Type:</span>
-                <span className="font-bold bg-blue-100 px-2 py-1 rounded-md">{carpenterProfile.addressProof.type}</span>
+                <span className="font-bold bg-blue-100 px-2 py-1 rounded-md">{editedProfile.addressProof?.type ?? carpenterProfile?.addressProof?.type}</span>
               </div>
             )}
-            {carpenterProfile?.addressProof?.documentNumber && (
+            {(editedProfile.addressProof?.documentNumber ?? carpenterProfile?.addressProof?.documentNumber) && (
               <div className="flex items-center gap-2">
                 <span className="font-medium">Document:</span>
                 <span className="font-bold">
-                  {'*' + '*'.repeat(Math.max(0, (carpenterProfile.addressProof.documentNumber?.length || 0) - 4)) + 
-                  (carpenterProfile.addressProof.documentNumber?.slice(-4) || '')}
+                  {'*' + '*'.repeat(Math.max(0, ((editedProfile.addressProof?.documentNumber ?? carpenterProfile?.addressProof?.documentNumber)?.length || 0) - 4)) + 
+                  ((editedProfile.addressProof?.documentNumber ?? carpenterProfile?.addressProof?.documentNumber)?.slice(-4) || '')}
                 </span>
               </div>
             )}
-            {carpenterProfile?.addressProof?.photoUrl && (
+            {(editedProfile.addressProof?.photoUrl ?? carpenterProfile?.addressProof?.photoUrl) && (
               <div className="mt-2">
                 <span className="font-medium">Proof Photo:</span>
                 <div className="mt-1 w-16 h-16 rounded-lg overflow-hidden border border-gray-200">
                   <img 
-                    src={carpenterProfile.addressProof.photoUrl} 
+                    src={editedProfile.addressProof?.photoUrl ?? carpenterProfile?.addressProof?.photoUrl} 
                     alt="Address Proof" 
                     className="w-full h-full object-cover"
                     onError={(e) => {
@@ -349,7 +351,7 @@ const CarpenterProfileEdit: React.FC<CarpenterProfileEditProps> = ({
                 </div>
               </div>
             )}
-            {carpenterProfile?.addressProof?.verified && (
+            {(editedProfile.addressProof?.verified ?? carpenterProfile?.addressProof?.verified) && (
               <div className="flex items-center gap-1 mt-2">
                 <ShieldCheck size={14} className="text-green-600" />
                 <span className="text-green-700 font-bold text-xs">Verified</span>

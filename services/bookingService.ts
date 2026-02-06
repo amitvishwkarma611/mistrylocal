@@ -330,6 +330,20 @@ export const acceptJobWithNotification = async (
       return false; // Already being processed
     }
     
+    // WALLET DEDUCTION: Check and deduct ₹100 lead charge BEFORE proceeding
+    try {
+      const { deductLeadCharge } = await import('./walletService');
+      await deductLeadCharge(carpenterId, 100);
+    } catch (error: any) {
+      if (error.message === 'LOW_BALANCE') {
+        if (typeof window !== 'undefined') {
+          alert('Low balance. Please recharge wallet.');
+        }
+        return false;
+      }
+      throw error; // Re-throw other errors
+    }
+    
     // CONCURRENCY GUARD: Prevent multiple simultaneous calls for same booking
     if (activeAcceptRequests.has(bookingId)) {
       console.warn(`⚠️ acceptJob blocked - request already in progress for booking ${bookingId}`);

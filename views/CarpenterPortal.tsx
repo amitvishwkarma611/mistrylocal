@@ -6,6 +6,7 @@ import { translations } from '../translations';
 import { setCarpenterOnlineStatus, startPollingSearchingBookings, stopPollingSearchingBookings, acceptJob, createOrUpdateCarpenter, BookingData } from '../services/bookingService';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
+import { getWalletBalance } from '../services/walletService';
 
 interface CarpenterPortalProps {
   bookings: Booking[];
@@ -25,6 +26,7 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
   const [isWorking, setIsWorking] = useState(false); // Track work start state
   const [isFinishing, setIsFinishing] = useState(false); // Track job finish state
   const [carpenterProfile, setCarpenterProfile] = useState<Carpenter | null>(null);
+  const [walletBalance, setWalletBalance] = useState<number>(0); // Wallet balance state
   
   // Initialize carpenter profile only once when component mounts (UBER-STYLE)
   useEffect(() => {
@@ -112,6 +114,22 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
     };
     
     fetchCarpenterProfile();
+  }, [user]);
+  
+  // Fetch wallet balance when component mounts
+  useEffect(() => {
+    const fetchWalletBalance = async () => {
+      if (user && user.uid) {
+        try {
+          const balance = await getWalletBalance(user.uid);
+          setWalletBalance(balance);
+        } catch (error) {
+          console.error('Error fetching wallet balance:', error);
+        }
+      }
+    };
+    
+    fetchWalletBalance();
   }, [user]);
   
   // Update online status separately when needed (lightweight)
@@ -296,6 +314,11 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
                 <Star size={14} fill="currentColor" /> {carpenterProfile?.rating || '4.9'}
               </span>
               <span className="text-[10px] font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded uppercase tracking-wider">{t('online')}</span>
+            </div>
+            {/* Wallet Balance Display */}
+            <div className="mt-2 flex items-center gap-2">
+              <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Wallet Balance</span>
+              <span className="text-sm font-bold text-amber-900">₹{walletBalance}</span>
             </div>
           </div>
         </div>
@@ -624,6 +647,40 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
           </div>
         </div>
       )}
+      
+      {/* Wallet Recharge Section */}
+      <div className="mb-8">
+        <div className="bg-white border border-gray-100 rounded-3xl p-5 shadow-sm">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="text-lg font-black text-amber-900">Wallet Management</h3>
+          </div>
+          <div className="flex flex-col gap-3">
+            <div className="flex items-center justify-between p-3 bg-amber-50 rounded-2xl">
+              <span className="text-sm font-bold text-amber-900">Current Balance</span>
+              <span className="text-lg font-black text-amber-900">₹{walletBalance}</span>
+            </div>
+            <button
+              onClick={async () => {
+                if (!user?.uid) return;
+                try {
+                  const { rechargeWallet } = await import('../services/walletService');
+                  await rechargeWallet(user.uid, 500);
+                  // Refresh balance display
+                  const balance = await getWalletBalance(user.uid);
+                  setWalletBalance(balance);
+                  alert('₹500 added to your wallet!');
+                } catch (error) {
+                  console.error('Error recharging wallet:', error);
+                  alert('Failed to recharge wallet. Please try again.');
+                }
+              }}
+              className="w-full py-3 bg-gradient-to-r from-amber-600 to-orange-600 text-white rounded-2xl font-bold text-sm shadow-md flex items-center justify-center gap-2 hover:shadow-lg active:scale-95 transition-all"
+            >
+              <IndianRupee size={16} /> Add ₹500 Test Balance
+            </button>
+          </div>
+        </div>
+      </div>
 
       {/* Cancelled Jobs Section */}
       {cancelledJobs.length > 0 && (

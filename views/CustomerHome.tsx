@@ -4,7 +4,7 @@ import { SERVICES, CATEGORIES, getIcon } from '../constants';
 import { analyzeCarpentryPhoto } from '../geminiService';
 import { Booking, JobStatus, Carpenter, AppRole } from '../types';
 import { translations, Language } from '../translations';
-import { Camera, Star, BadgeCheck, Loader2, X, ArrowRight, Hammer, PenLine, Radar, Zap, MessageSquare, Phone, Navigation, ChevronRight, CheckSquare, Square, CheckCircle2, IndianRupee, Clock } from 'lucide-react';
+import { Camera, Star, BadgeCheck, Loader2, X, ArrowRight, Hammer, PenLine, Radar, Zap, MessageSquare, Phone, Navigation, ChevronRight, CheckSquare, Square, CheckCircle as CheckCircle2, IndianRupee, Clock } from 'lucide-react';
 import { createBooking } from '../services/bookingService';
 
 interface CustomerHomeProps {
@@ -25,7 +25,7 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
   const [customIssue, setCustomIssue] = useState('');
   const [isCustomMode, setIsCustomMode] = useState(false);
   // Removed location state - using area-based matching only
-  const [selectedArea, setSelectedArea] = useState('Sector 45, Gurgaon');
+  const [selectedArea, setSelectedArea] = useState('Airoli, Mumbai');
   
   // Ref to track previous service selection count for immediate UI updates
   const prevSelectedCountRef = useRef(selectedServiceIds.length);
@@ -202,11 +202,7 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
     return cat.name;
   }
 
-  const handleConfirmLocation = () => {
-    const mockAddress = `Sector 45, Gurgaon (Near Lat: ${location.lat.toFixed(4)})`;
-    setLocation(prev => ({ ...prev, address: mockAddress }));
-    setShowMap(false);
-  };
+
 
   const handleBooking = async (ids?: string[], user?: { role: AppRole; name: string; phone: string; uid: string }) => {
     console.log('🚀 handleBooking called with:', { ids, user });
@@ -268,10 +264,10 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
         problemType: 'General Issue',
         description: text,
         location: {
-          lat: 28.4595,
-          lng: 77.0266
+          lat: 19.1709,  // Airoli latitude
+          lng: 72.9966   // Airoli longitude
         },
-        pincode: '122001'
+        pincode: '400707'
       });
       
       console.log('✅ Booking created successfully with ID:', bookingId);

@@ -42,10 +42,11 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
             phone: user.phone,
             online: true,
             services: ['Furniture Repair', 'Installation', 'Custom Work'],
-            location: { lat: 28.4595, lng: 77.0266 }, // Default location
-            city: 'Gurgaon',
+            location: { lat: 19.1709, lng: 72.9966 }, // Airoli location
+            city: 'Mumbai',
             rating: 4.9,
-            serviceAreas: serviceAreas // Use state service areas
+            serviceAreas: ['400707', '400708'], // Airoli service areas
+            serviceArea: 'airoli' // Primary service area
           });
         } catch (error) {
           console.error('Error initializing carpenter profile:', error);
@@ -131,7 +132,7 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
   
   // State for nearby jobs
   const [nearbyJobs, setNearbyJobs] = useState<Booking[]>([]);
-  const [serviceAreas, setServiceAreas] = useState<string[]>(['122001', '122002', '122003']); // Default service areas
+  const [serviceAreas, setServiceAreas] = useState<string[]>(['400707', '400708']); // Airoli service areas
   
   // Refs to track component state
   const isMountedRef = useRef(true);
@@ -139,13 +140,19 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
   const listenerCleanupRef = useRef<(() => void) | null>(null);
   const hasAttachedListenerRef = useRef(false);
   
+  // FLAG to track if this component started polling (StrictMode safety)
+  const startedPollingByThisComponent = useRef(false);
+
   // POLLING MANAGEMENT - Start/stop based on online status
   useEffect(() => {
     // Only start polling when carpenter is online and has valid user
     if (!user || !user.uid || !online) {
       // Stop polling if carpenter goes offline
       console.log('🛑 Stopping polling - carpenter offline or no user');
-      stopPollingSearchingBookings();
+      if (startedPollingByThisComponent.current) {
+        stopPollingSearchingBookings();
+        startedPollingByThisComponent.current = false;
+      }
       setNearbyJobs([]); // Clear jobs when going offline
       return;
     }
@@ -196,16 +203,24 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
           
           return hasChanges ? sortedJobs : prevJobs;
         });
-      }
+      },
+      'airoli' // Filter by airoli service area
     );
     
+    // Mark that this component started polling
+    startedPollingByThisComponent.current = true;
+    
   }, [user?.uid, online, serviceAreas]); // Dependencies: user, online status, service areas
-  
+
   // Cleanup polling on component unmount
   useEffect(() => {
     return () => {
       console.log('🧹 Final cleanup - stopping polling on component unmount');
-      stopPollingSearchingBookings();
+      // ONLY stop polling if this component was the one that started it
+      if (startedPollingByThisComponent.current) {
+        stopPollingSearchingBookings();
+        startedPollingByThisComponent.current = false;
+      }
     };
   }, []); // EMPTY DEPENDENCY ARRAY - runs only on unmount
   
@@ -420,7 +435,7 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
                         if (isNavigating) return;
                         setIsNavigating(true);
                         try {
-                          await onUpdateStatus(currentJob.id, JobStatus.ON_THE_WAY);
+                          await onUpdateStatus(currentJob.id, JobStatus.ON_THE_WAY, user?.uid);
                           console.log('✅ Navigation started successfully');
                         } catch (error) {
                           console.error('❌ Error starting navigation:', error);
@@ -446,7 +461,7 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
                          if (hasArrived) return;
                          setHasArrived(true);
                          try {
-                           await onUpdateStatus(currentJob.id, JobStatus.ARRIVED);
+                           await onUpdateStatus(currentJob.id, JobStatus.ARRIVED, user?.uid);
                            console.log('✅ Arrived successfully');
                          } catch (error) {
                            console.error('❌ Error marking arrival:', error);
@@ -468,7 +483,7 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
                       if (isWorking) return;
                       setIsWorking(true);
                       try {
-                        await onUpdateStatus(currentJob.id, JobStatus.WORK_IN_PROGRESS);
+                        await onUpdateStatus(currentJob.id, JobStatus.WORK_IN_PROGRESS, user?.uid);
                         console.log('✅ Work started successfully');
                       } catch (error) {
                         console.error('❌ Error starting work:', error);
@@ -489,7 +504,7 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
                        if (isFinishing) return;
                        setIsFinishing(true);
                        try {
-                         await onUpdateStatus(currentJob.id, JobStatus.COMPLETED);
+                         await onUpdateStatus(currentJob.id, JobStatus.COMPLETED, user?.uid);
                          console.log('✅ Job completed successfully');
                        } catch (error) {
                          console.error('❌ Error completing job:', error);

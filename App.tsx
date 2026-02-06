@@ -20,6 +20,9 @@ declare global {
   }
 }
 
+// In-memory map to track active auto-cancel timers
+const autoCancelTimers = new Map<string, NodeJS.Timeout>();
+
 const INITIAL_BOOKINGS: Booking[] = [];
 
 // Error boundary temporarily removed due to TypeScript issues
@@ -36,8 +39,12 @@ const App: React.FC = () => {
   const [carpenterProfile, setCarpenterProfile] = useState<Carpenter | null>(null);
   const [customerProfile, setCustomerProfile] = useState<Customer | null>(null);
   
-  // Removed gpsInterval - no longer needed with area-based matching
-
+  // Ref to prevent duplicate Firestore listeners
+  const bookingListenerRef = useRef<(() => void) | null>(null);
+  
+  // In-memory set to track processed booking IDs
+  const processedBookingIds = new Set<string>();
+  
   // Fetch carpenter profile for carpenter users
   useEffect(() => {
     const fetchCarpenterProfile = async () => {
@@ -228,12 +235,21 @@ const App: React.FC = () => {
                   return !oldBooking || 
                     newBooking.id !== oldBooking.id || 
                     newBooking.status !== oldBooking.status ||
-                    newBooking.mistry !== oldBooking.mistry;
+                    newBooking.mistry !== oldBooking.mistry ||
+                    newBooking.mistryId !== oldBooking.mistryId ||
+                    newBooking.customerName !== oldBooking.customerName ||
+                    newBooking.createdAt !== oldBooking.createdAt;
                 });
               
               if (hasChanges) {
+                if (process.env.NODE_ENV === 'development') {
+                  console.log(`🔄 Bookings updated (${prevBookings.length} → ${convertedBookings.length}), changes detected`);
+                }
                 return convertedBookings;
               }
+              if (process.env.NODE_ENV === 'development') {
+                  console.log(`✅ Bookings unchanged, keeping existing array (${prevBookings.length} items)`);
+                }
               return prevBookings; // No changes, return existing array
             });
           };
@@ -264,11 +280,13 @@ const App: React.FC = () => {
     // Cleanup function
     return () => {
       if (intervalId) {
-        console.log('🧹 Cleaning up booking polling interval');
+        if (process.env.NODE_ENV === 'development') {
+          console.log('🧹 Cleaning up booking polling interval');
+        }
         clearInterval(intervalId);
       }
     };
-  }, [user?.uid]);
+  }, [user?.uid]); // Only run when user UID changes
   
   // Update carpenter profile stats based on completed bookings
   useEffect(() => {
@@ -570,63 +588,107 @@ const App: React.FC = () => {
 
   // Removed GPS tracking effect - no longer needed with area-based matching
 
-  // Automatic cancellation of searching bookings after 60 seconds
+  // AUTO-CANCELLATION TIMER MAP - One timer per booking ID
+  const autoCancelTimers = new Map<string, NodeJS.Timeout>();
+  
+  // Auto-cancellation logic with two-phase timing
   useEffect(() => {
-    const autoCancelTimeouts = new Map<string, NodeJS.Timeout>();
+    const now = Date.now();
     
-    // Set up auto-cancellation for new searching bookings
-    const setupAutoCancellation = (bookingId: string, createdAt: number) => {
-      // Clear any existing timeout for this booking
-      if (autoCancelTimeouts.has(bookingId)) {
-        clearTimeout(autoCancelTimeouts.get(bookingId)!);
-        autoCancelTimeouts.delete(bookingId);
-      }
-      
-      // Calculate remaining time (60 seconds total)
-      const elapsed = Date.now() - createdAt;
-      const remainingTime = Math.max(0, 60000 - elapsed); // 60 seconds = 60000ms
-      
-      if (remainingTime > 0) {
-        console.log(`⏱️ Setting up auto-cancellation for booking ${bookingId} in ${remainingTime}ms`);
-        const timeoutId = setTimeout(() => {
-          // Check if booking is still searching before cancelling
-          const booking = bookings.find(b => b.id === bookingId);
-          if (booking && booking.status === JobStatus.SEARCHING) {
-            console.log(`⏰ Auto-cancelling booking ${bookingId} after 60 seconds`);
-            cancelBookingRequest(bookingId);
-          }
-          autoCancelTimeouts.delete(bookingId);
-        }, remainingTime);
-        
-        autoCancelTimeouts.set(bookingId, timeoutId);
-      }
-    };
-    
-    // Set up auto-cancellation for existing searching bookings
     bookings.forEach(booking => {
+      const bookingId = booking.id;
+      
+      // PHASE 1: SEARCHING -> 60 second timer
       if (booking.status === JobStatus.SEARCHING) {
-        setupAutoCancellation(booking.id, booking.createdAt);
+        if (!autoCancelTimers.has(bookingId)) {
+          // Calculate remaining time (60 seconds = 60000ms)
+          const elapsed = now - booking.createdAt;
+          const remainingTime = Math.max(0, 60000 - elapsed);
+          
+          if (remainingTime > 0) {
+            if (process.env.NODE_ENV === 'development') {
+              console.log(`⏱️ SEARCHING: Setting 60s auto-cancel timer for ${bookingId} (${remainingTime}ms left)`);
+            }
+            
+            const timeoutId = setTimeout(() => {
+              const currentBooking = bookings.find(b => b.id === bookingId);
+              if (currentBooking?.status === JobStatus.SEARCHING) {
+                if (process.env.NODE_ENV === 'development') {
+                  console.log(`⏰ SEARCHING TIMEOUT: Auto-cancelling ${bookingId} after 60 seconds`);
+                }
+                cancelBookingRequest(bookingId);
+              }
+              autoCancelTimers.delete(bookingId);
+            }, remainingTime);
+            
+            autoCancelTimers.set(bookingId, timeoutId);
+          }
+        }
+      }
+      
+      // PHASE 2: ACCEPTED -> 10 minute timer for carpenter action
+      else if (booking.status === JobStatus.ACCEPTED) {
+        // Clear SEARCHING timer if exists
+        if (autoCancelTimers.has(bookingId)) {
+          const existingTimer = autoCancelTimers.get(bookingId);
+          if (existingTimer) clearTimeout(existingTimer);
+          autoCancelTimers.delete(bookingId);
+          if (process.env.NODE_ENV === 'development') {
+            console.log(`✅ Cleared SEARCHING timer for ${bookingId} (now ACCEPTED)`);
+          }
+        }
+        
+        // Start 10-minute inactivity timer
+        if (!autoCancelTimers.has(bookingId)) {
+          if (process.env.NODE_ENV === 'development') {
+            console.log(`⏱️ ACCEPTED: Setting 10min activity timer for ${bookingId}`);
+          }
+          
+          const timeoutId = setTimeout(() => {
+            const currentBooking = bookings.find(b => b.id === bookingId);
+            if (currentBooking?.status === JobStatus.ACCEPTED) {
+              if (process.env.NODE_ENV === 'development') {
+                console.log(`⏰ ACCEPTED TIMEOUT: Auto-cancelling ${bookingId} - carpenter inactive for 10 minutes`);
+              }
+              cancelBookingRequest(bookingId);
+            }
+            autoCancelTimers.delete(bookingId);
+          }, 600000); // 10 minutes = 600000ms
+          
+          autoCancelTimers.set(bookingId, timeoutId);
+        }
+      }
+      
+      // PHASE 3: ON_THE_WAY and later -> Clear all timers permanently
+      else if (booking.status === JobStatus.ON_THE_WAY || 
+               booking.status === JobStatus.ARRIVED || 
+               booking.status === JobStatus.WORK_IN_PROGRESS || 
+               booking.status === JobStatus.COMPLETED) {
+        
+        if (autoCancelTimers.has(bookingId)) {
+          const timer = autoCancelTimers.get(bookingId);
+          if (timer) clearTimeout(timer);
+          autoCancelTimers.delete(bookingId);
+          
+          if (process.env.NODE_ENV === 'development') {
+            console.log(`✅ Permanently cleared all timers for ${bookingId} (status: ${booking.status})`);
+          }
+        }
       }
     });
     
-    // Clean up timeouts on component unmount
+    // Cleanup function - called on effect re-run or unmount
     return () => {
-      autoCancelTimeouts.forEach(timeoutId => clearTimeout(timeoutId));
-      autoCancelTimeouts.clear();
-      
-      // Clean up old localStorage entries
-      const now = Date.now();
-      Object.keys(localStorage).forEach(key => {
-        if (key.startsWith('last_update_')) {
-          const timestamp = parseInt(localStorage.getItem(key) || '0');
-          // Remove entries older than 10 minutes
-          if (now - timestamp > 600000) {
-            localStorage.removeItem(key);
-          }
+      // Clear all remaining timers
+      autoCancelTimers.forEach((timer, bookingId) => {
+        clearTimeout(timer);
+        if (process.env.NODE_ENV === 'development') {
+          console.log(`🧹 Cleanup: Cleared timer for ${bookingId}`);
         }
       });
+      autoCancelTimers.clear();
     };
-  }, [bookings]);
+  }, [bookings]); // Only re-run when bookings change
 
   return (
     <div className="mobile-container flex flex-col min-h-screen border-x border-gray-100 relative overflow-hidden">

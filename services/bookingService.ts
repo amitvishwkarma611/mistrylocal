@@ -62,7 +62,9 @@ const executeWriteOperation = async <T>(operationKey: string, operation: () => P
   // Check if we're at max concurrent writes
   if (activeWriteOperations.size >= MAX_CONCURRENT_WRITES) {
     // Queue the operation instead of throwing error
-    console.log(`🕒 Queuing operation: ${operationKey}`);
+    if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+      console.log(`🕒 Queuing operation: ${operationKey}`);
+    }
     return new Promise((resolve, reject) => {
       writeQueue.push(async () => {
         try {
@@ -80,7 +82,9 @@ const executeWriteOperation = async <T>(operationKey: string, operation: () => P
   const lastWrite = lastWriteTimes.get(operationKey);
   if (lastWrite && (now - lastWrite) < WRITE_COOLDOWN_MS) {
     const remainingCooldown = WRITE_COOLDOWN_MS - (now - lastWrite);
-    console.log(`⏳ Cooldown active for ${operationKey}. Queuing operation.`);
+    if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+      console.log(`⏳ Cooldown active for ${operationKey}. Queuing operation.`);
+    }
     // Queue the operation instead of throwing error
     return new Promise((resolve, reject) => {
       writeQueue.push(async () => {
@@ -101,10 +105,14 @@ const executeWriteOperation = async <T>(operationKey: string, operation: () => P
   
   try {
     const result = await operation();
-    console.log(`✅ Write operation completed: ${operationKey}`);
+    if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+      console.log(`✅ Write operation completed: ${operationKey}`);
+    }
     return result;
   } catch (error) {
-    console.error(`❌ Write operation failed: ${operationKey}`, error);
+    if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+      console.error(`❌ Write operation failed: ${operationKey}`, error);
+    }
     throw error;
   } finally {
     // Always cleanup
@@ -121,6 +129,7 @@ const executeWriteOperation = async <T>(operationKey: string, operation: () => P
     }
   }
 };
+
 export interface BookingData {
   id?: string;
   customerId: string;
@@ -215,6 +224,9 @@ const activeAcceptRequests = new Set<string>(); // Track booking IDs being proce
 // CARPENTER ACTIVE JOB TRACKING - Ensures one job per carpenter
 const carpenterActiveJobs = new Map<string, string>(); // carpenterId -> bookingId
 
+// ACCEPTING BOOKINGS GUARD - Prevent double execution
+const acceptingBookings = new Set<string>(); // Track bookings currently being accepted
+
 // POLLING SYSTEM STATE
 // Track active polling timers
 let pollingTimer: ReturnType<typeof setInterval> | null = null;
@@ -225,26 +237,47 @@ const MAX_POLLING_ERRORS = 3;
 const BASE_POLLING_INTERVAL = 8000; // 8 seconds for better responsiveness
 const MAX_POLLING_INTERVAL = 30000; // 30 seconds
 
-/**
- * Creates a new booking with area-based matching and geographic restrictions
- * QUOTA-SAFE: Simple document creation, no distribution logic
- * @param bookingData - Booking information including pincode
- * @returns Promise with the created booking ID
- */
+// CONSTANT for default service area
+const DEFAULT_SERVICE_AREA = "airoli";
+
+// GLOBAL SINGLETON POLLING MANAGEMENT
+// Prevent multiple polling instances across app
+let globalPollingActive = false;
+let globalPollingStopFn: (() => void) | null = null;
+
+// ONLINE STATUS CACHE
+// Prevent duplicate writes to Firestore for same status
+const onlineStatusCache = new Map<string, boolean>();
+
+// CREATED CARPENTERS TRACKING
+// Prevent duplicate carpenter creation
+const createdCarpenters = new Set<string>();
+
 export const createBookingWithDistribution = async (
   bookingData: Omit<BookingData, 'id' | 'status' | 'createdAt' | 'assignedCarpenterId' | 'serviceArea'>
 ): Promise<string> => {
-  console.log('📥 createBookingWithDistribution called with:', bookingData);
+  if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+    console.log('📥 createBookingWithDistribution called with:', bookingData);
+  }
   
-  // GEOGRAPHIC RESTRICTION: Validate service area
-  const serviceArea = getServiceAreaByPincode(bookingData.pincode);
+  // Validate pincode is in airoli service area
+  const validAiroliPincodes = ['400707', '400708'];
+  if (!validAiroliPincodes.includes(bookingData.pincode)) {
+    throw new Error('Booking pincode is not in Airoli service area');
+  }
   
-  if (!serviceArea) {
-    throw new Error(RESTRICTED_AREA_MESSAGE);
+  // FORCE CORRECT SERVICE AREA: Always use airoli
+  const serviceArea = DEFAULT_SERVICE_AREA;
+  
+  // Validate service area is correct
+  if (serviceArea !== "airoli") {
+    throw new Error("Service area must be airoli");
   }
   
   return executeWriteOperation('create_booking', async () => {
-    console.log('📤 Creating booking document in Firestore...');
+    if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+      console.log('📤 Creating booking document in Firestore...');
+    }
     
     // Create the booking document with minimal data for faster creation
     const bookingRef = await addDoc(collection(db, 'bookings'), {
@@ -264,9 +297,11 @@ export const createBookingWithDistribution = async (
     });
     
     const bookingId = bookingRef.id;
-    console.log('✅ Booking created with ID:', bookingId);
-    console.log('📄 Booking document reference:', bookingRef.path);
-    console.log('📍 Service area:', serviceArea);
+    if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+      console.log('✅ Booking created with ID:', bookingId);
+      console.log('📄 Booking document reference:', bookingRef.path);
+      console.log('📍 Service area:', serviceArea);
+    }
     
     return bookingId;
   });
@@ -287,70 +322,130 @@ export const acceptJobWithNotification = async (
   carpenterName: string
 ): Promise<boolean> => {
   return executeWriteOperation(`accept_job_${bookingId}`, async () => {
+    // PREVENT DOUBLE EXECUTION GUARD
+    if (acceptingBookings.has(bookingId)) {
+      if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+        console.log(`⚠️ acceptJob blocked - already processing booking ${bookingId}`);
+      }
+      return false; // Already being processed
+    }
+    
     // CONCURRENCY GUARD: Prevent multiple simultaneous calls for same booking
     if (activeAcceptRequests.has(bookingId)) {
       console.warn(`⚠️ acceptJob blocked - request already in progress for booking ${bookingId}`);
       return false; // Already being processed
     }
     
+    // CARPENTER CONCURRENCY GUARD: Prevent multiple simultaneous calls for same carpenter
+    if (activeAcceptRequests.has(`carpenter_${carpenterId}`)) {
+      console.warn(`⚠️ acceptJob blocked - another request for carpenter ${carpenterId} already in progress`);
+      return false; // Another request for this carpenter is already in progress
+    }
+    
     // CARPENTER JOB LIMIT CHECK: Prevent carpenter from taking multiple jobs
+    // We'll check both local tracking AND Firestore to ensure consistency
     if (carpenterActiveJobs.has(carpenterId)) {
       const existingBookingId = carpenterActiveJobs.get(carpenterId);
-      console.warn(`⚠️ Carpenter ${carpenterId} already has active job ${existingBookingId}`);
+      if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+        console.warn(`⚠️ Carpenter ${carpenterId} already has active job ${existingBookingId} (from local cache)`);
+      }
       return false; // Carpenter already has an active job
     }
     
-    // Mark this booking as being processed
+    // Mark this booking and carpenter as being processed
+    acceptingBookings.add(bookingId);
     activeAcceptRequests.add(bookingId);
-    
+    activeAcceptRequests.add(`carpenter_${carpenterId}`);
+
     const bookingRef = doc(db, 'bookings', bookingId);
     const carpenterRef = doc(db, 'carpenters', carpenterId);
     
     try {
-      // SINGLE TRANSACTION - no retry loops, no exponential backoff
+      // DOUBLE-CHECK: Ensure carpenter still doesn't have an active job before entering transaction
+      // This handles any potential race condition between the initial check and transaction start
+      if (carpenterActiveJobs.has(carpenterId)) {
+        if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+          console.warn(`⚠️ Carpenter ${carpenterId} already has active job ${carpenterActiveJobs.get(carpenterId)} (double-check before transaction)`);
+        }
+        return false; // Carpenter already has an active job
+      }
+      
+      // SINGLE TRANSACTION - CRITICAL: FOLLOW READ-THEN-WRITE PATTERN
       await runTransaction(db, async (transaction) => {
-        // Read the booking document
+        // STEP 1 — READ booking document
         const bookingSnapshot = await transaction.get(bookingRef);
         
         if (!bookingSnapshot.exists()) {
-          throw new Error('Booking does not exist');
+          throw new Error('BOOKING_DOES_NOT_EXIST');
         }
         
         const bookingData = bookingSnapshot.data() as BookingData;
         
-        // VERIFY status is still SEARCHING (race condition check)
+        // if booking.status !== "SEARCHING" → throw "JOB_ALREADY_TAKEN"
         if (bookingData.status !== JobStatus.SEARCHING) {
-          throw new Error('Job is no longer available');
+          throw new Error('JOB_ALREADY_TAKEN');
         }
         
-        // Read carpenter document to verify availability
+        // STEP 2 — READ carpenter profile
         const carpenterSnapshot = await transaction.get(carpenterRef);
         
         if (!carpenterSnapshot.exists()) {
-          throw new Error('Carpenter does not exist');
+          throw new Error('CARPENTER_DOES_NOT_EXIST');
         }
         
         const carpenterData = carpenterSnapshot.data() as any;
         
-        // VERIFY carpenter doesn't already have an active job
+        // if carpenter.activeJobId exists → throw "CARPENTER_BUSY"
         if (carpenterData.activeJobId) {
-          throw new Error('Carpenter already has an active job');
+          // Check if the active job in Firestore still exists and is still active
+          // If the job doesn't exist or is no longer active, we should clear the carpenter's activeJobId
+          const activeBookingRef = doc(db, 'bookings', carpenterData.activeJobId);
+          const activeBookingSnapshot = await transaction.get(activeBookingRef);
+          
+          if (!activeBookingSnapshot.exists()) {
+            // Active job doesn't exist in Firestore, clear carpenter's activeJobId
+            transaction.update(carpenterRef, {
+              activeJobId: null,
+              isAvailable: true,
+              updatedAt: serverTimestamp()
+            });
+          } else {
+            const activeBookingData = activeBookingSnapshot.data() as BookingData;
+            // If the job exists but is no longer in an active state, clear carpenter's activeJobId
+            if (activeBookingData.status !== JobStatus.ACCEPTED && 
+                activeBookingData.status !== JobStatus.ON_THE_WAY &&
+                activeBookingData.status !== JobStatus.ARRIVED &&
+                activeBookingData.status !== JobStatus.WORK_IN_PROGRESS) {
+              // Job is no longer active, clear carpenter's activeJobId
+              transaction.update(carpenterRef, {
+                activeJobId: null,
+                isAvailable: true,
+                updatedAt: serverTimestamp()
+              });
+              // Update local tracking to reflect the cleared active job
+              carpenterActiveJobs.delete(carpenterId);
+            } else {
+              // The carpenter truly has an active job, update local tracking and throw error
+              carpenterActiveJobs.set(carpenterId, carpenterData.activeJobId);
+              throw new Error('CARPENTER_BUSY');
+            }
+          }
         }
         
-        // Calculate timeout time (5 minutes from now)
-        const acceptTimeoutAt = new Date(Date.now() + 300000); // 5 minutes = 300000 ms
-        
-        // ATOMIC UPDATE - booking status and assignment with timeout fields
+        // STEP 3 — WRITE atomically (NO writes before reads!)
+        // booking.status = "ACCEPTED"
+        // booking.mistryId = carpenterId  
+        // booking.acceptedAt = serverTimestamp()
+        // carpenter.activeJobId = bookingId
+        // carpenter.isAvailable = false
         transaction.update(bookingRef, {
           status: JobStatus.ACCEPTED,
           assignedCarpenterId: carpenterId,
           assignedCarpenterName: carpenterName,
           acceptedAt: serverTimestamp(),
-          acceptTimeoutAt: acceptTimeoutAt,
           updatedAt: serverTimestamp()
         });
         
-        // ATOMIC UPDATE - carpenter active job tracking
         transaction.update(carpenterRef, {
           activeJobId: bookingId,
           isAvailable: false,
@@ -360,14 +455,20 @@ export const acceptJobWithNotification = async (
       
       // SUCCESS: Update local tracking
       carpenterActiveJobs.set(carpenterId, bookingId);
-      console.log(`✅ Job ${bookingId} accepted by carpenter ${carpenterId}`);
+      if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+        console.log(`✅ Job ${bookingId} accepted by carpenter ${carpenterId}`);
+      }
       
       return true;
     } catch (error: any) {
-      console.error('❌ Error accepting job:', error);
+      if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+        console.error('❌ Error accepting job:', error);
+      }
       
       // FAILURE MEANS JOB TAKEN OR CARPENTER BUSY - no retries, no storm
-      if (error.message.includes('available') || 
+      if (error.message === 'JOB_ALREADY_TAKEN' || 
+          error.message === 'CARPENTER_BUSY' ||
+          error.message.includes('available') || 
           error.message.includes('does not exist') || 
           error.message.includes('active job')) {
         return false; // Job was already taken or carpenter busy
@@ -375,8 +476,10 @@ export const acceptJobWithNotification = async (
       
       throw error; // Re-throw other errors for UI to handle
     } finally {
-      // ALWAYS clean up the guard, regardless of success/failure
+      // ALWAYS clean up the guards, regardless of success/failure
+      acceptingBookings.delete(bookingId);
       activeAcceptRequests.delete(bookingId);
+      activeAcceptRequests.delete(`carpenter_${carpenterId}`);
     }
   });
 };
@@ -397,7 +500,13 @@ export const startPollingSearchingBookings = (
   callback: (bookings: BookingData[]) => void,
   serviceAreaFilter?: string
 ): void => {
-  // Stop existing polling if active
+  // CRITICAL: GLOBAL SINGLETON CHECK - prevent multiple polling instances
+  if (globalPollingActive) {
+    console.log('⚠️ Polling already active globally, skipping duplicate start');
+    return;
+  }
+  
+  // Stop existing polling if active (shouldn't happen with global check but for safety)
   if (pollingTimer) {
     console.log('🔄 Stopping existing polling timer');
     clearInterval(pollingTimer);
@@ -414,6 +523,9 @@ export const startPollingSearchingBookings = (
   // Store callback
   pollingCallback = callback;
   isPollingActive = true;
+  
+  // Mark as globally active
+  globalPollingActive = true;
   
   // Initial fetch
   pollForBookings(serviceAreas, serviceAreaFilter);
@@ -463,6 +575,7 @@ export const startPollingSearchingBookings = (
 export const stopPollingSearchingBookings = (): void => {
   console.log('🛑 Stopping polling for searching bookings');
   
+  // Only stop if polling is actually active
   if (pollingTimer) {
     clearInterval(pollingTimer);
     pollingTimer = null;
@@ -471,6 +584,10 @@ export const stopPollingSearchingBookings = (): void => {
   isPollingActive = false;
   pollingCallback = null;
   pollingErrorCount = 0; // Reset error counter
+  
+  // Mark as globally inactive
+  globalPollingActive = false;
+  globalPollingStopFn = null;
 };
 
 /**
@@ -510,7 +627,9 @@ const pollForBookings = async (serviceAreas: string[], serviceAreaFilter?: strin
     
     console.log(`📊 Polled ${bookings.length} searching bookings`);
     if (serviceAreaFilter) {
-      console.log(`📍 Filtered by service area: ${serviceAreaFilter}`);
+      if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+        console.log(`📍 Filtered by service area: ${serviceAreaFilter}`);
+      }
     }
     
     // Notify callback if available - ONLY for searching jobs
@@ -546,7 +665,9 @@ export const forceCleanupAllListeners = (): void => {
   pollingErrorCount = 0;
   carpenterActiveJobs.clear(); // Clear carpenter job tracking
   
-  console.log('✅ All polling stopped and tracking collections cleaned up');
+  if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+    console.log('✅ All polling stopped and tracking collections cleaned up');
+  }
 };
 
 /**
@@ -568,7 +689,7 @@ export const getTrackingStats = (): Record<string, number> => {
  * @param bookingData - Booking information including pincode
  * @returns Promise with the created booking ID
  */
-export const createBooking = async (bookingData: Omit<BookingData, 'id' | 'status' | 'createdAt' | 'assignedCarpenterId'>): Promise<string> => {
+export const createBooking = async (bookingData: Omit<BookingData, 'id' | 'status' | 'createdAt' | 'assignedCarpenterId' | 'serviceArea'>): Promise<string> => {
   return createBookingWithDistribution(bookingData);
 };
 
@@ -688,13 +809,18 @@ export const checkAndHandleBookingTimeout = async (bookingData: BookingData): Pr
           isAvailable: true,
           updatedAt: serverTimestamp()
         });
+        
+        // Also update local tracking to match
+        carpenterActiveJobs.delete(carpenterId);
       }
     });
     
     // Mark as processed to prevent duplicates in this session
     processedTimeouts.add(bookingId);
     
-    console.log(`✅ Booking ${bookingId} timed out after 5 minutes of inactivity`);
+    if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+      console.log(`✅ Booking ${bookingId} timed out after 5 minutes of inactivity`);
+    }
     return true;
     
   } catch (error: any) {
@@ -742,11 +868,16 @@ export const releaseCarpenterJob = async (carpenterId: string, bookingId?: strin
         isAvailable: true,
         updatedAt: serverTimestamp()
       });
+      
+      // Also update local tracking to match
+      carpenterActiveJobs.delete(carpenterId);
     });
     
     // Update local tracking
     carpenterActiveJobs.delete(carpenterId);
-    console.log(`✅ Carpenter ${carpenterId} job released`);
+    if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+      console.log(`✅ Carpenter ${carpenterId} job released`);
+    }
     
   } catch (error) {
     console.error('❌ Error releasing carpenter job:', error);
@@ -787,10 +918,14 @@ export const startBookingJob = async (bookingId: string): Promise<void> => {
       });
     });
     
-    console.log(`✅ Booking ${bookingId} marked as started`);
+    if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+      console.log(`✅ Booking ${bookingId} marked as started`);
+    }
     
   } catch (error) {
-    console.error('❌ Error starting booking job:', error);
+    if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+      console.error('❌ Error starting booking job:', error);
+    }
     throw error;
   }
 };
@@ -814,9 +949,13 @@ export const submitBookingRating = async (bookingId: string, ratingValue: number
         updatedAt: serverTimestamp()
       });
       
-      console.log(`✅ Rating submitted for booking ${bookingId}: ${ratingValue} stars`);
+      if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+        console.log(`✅ Rating submitted for booking ${bookingId}: ${ratingValue} stars`);
+      }
     } catch (error) {
-      console.error('❌ Error submitting booking rating:', error);
+      if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+        console.error('❌ Error submitting booking rating:', error);
+      }
       throw error;
     }
   });
@@ -939,16 +1078,22 @@ export const updateBookingStatus = async (bookingId: string, status: JobStatus):
             try {
               await releaseCarpenterJob(bookingData.assignedCarpenterId, bookingId);
             } catch (error) {
-              console.warn('Warning: Failed to release carpenter job:', error);
+              if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+                console.warn('Warning: Failed to release carpenter job:', error);
+              }
               // Don't throw error here as the status update succeeded
             }
           }
         }
       }
       
-      console.log(`✅ Booking ${bookingId} status updated to: ${status}`);
+      if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+        console.log(`✅ Booking ${bookingId} status updated to: ${status}`);
+      }
     } catch (error) {
-      console.error('❌ Error updating booking status:', error);
+      if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+        console.error('❌ Error updating booking status:', error);
+      }
       throw error;
     } finally {
       // ALWAYS clean up the guard, regardless of success/failure
@@ -1010,6 +1155,31 @@ export const getWaveForBooking = (createdAt: any): number => {
  * @param carpenterData - Carpenter information
  */
 export const createOrUpdateCarpenter = async (carpenterData: Omit<CarpenterData, 'id'> & { id: string }): Promise<void> => {
+  // PREVENT DUPLICATE CREATION: Check if carpenter already created
+  if (createdCarpenters.has(carpenterData.id)) {
+    // If already created, just update online status and services
+    return executeWriteOperation(`update_carpenter_${carpenterData.id}`, async () => {
+      try {
+        const carpenterRef = doc(db, 'carpenters', carpenterData.id);
+        
+        // Update only online status and services
+        await updateDoc(carpenterRef, {
+          online: carpenterData.online,
+          services: carpenterData.services,
+          serviceAreas: carpenterData.serviceAreas,
+          updatedAt: serverTimestamp()
+        });
+        
+        if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+          console.log(`Carpenter ${carpenterData.id} profile exists, updated online status and services`);
+        }
+      } catch (error) {
+        console.error('Error updating carpenter profile:', error);
+        throw error;
+      }
+    });
+  }
+  
   return executeWriteOperation(`create_carpenter_${carpenterData.id}`, async () => {
     try {
       const carpenterRef = doc(db, 'carpenters', carpenterData.id);
@@ -1025,7 +1195,12 @@ export const createOrUpdateCarpenter = async (carpenterData: Omit<CarpenterData,
           updatedAt: serverTimestamp()
         });
         
-        console.log(`Carpenter ${carpenterData.id} profile created`);
+        // Mark as created to prevent duplicate creation
+        createdCarpenters.add(carpenterData.id);
+        
+        if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+          console.log(`Carpenter ${carpenterData.id} profile created`);
+        }
       } else {
         // If document exists, just update the online status and services
         await updateDoc(carpenterRef, {
@@ -1035,7 +1210,12 @@ export const createOrUpdateCarpenter = async (carpenterData: Omit<CarpenterData,
           updatedAt: serverTimestamp()
         });
         
-        console.log(`Carpenter ${carpenterData.id} profile exists, updated online status and services`);
+        // Mark as created to prevent future duplicate creation attempts
+        createdCarpenters.add(carpenterData.id);
+        
+        if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+          console.log(`Carpenter ${carpenterData.id} profile exists, updated online status and services`);
+        }
       }
     } catch (error) {
       console.error('Error creating/updating carpenter profile:', error);
@@ -1051,6 +1231,14 @@ export const createOrUpdateCarpenter = async (carpenterData: Omit<CarpenterData,
  * @param online - Boolean indicating online status
  */
 export const setCarpenterOnlineStatus = async (carpenterId: string, online: boolean): Promise<void> => {
+  // PREVENT DUPLICATE WRITES: Check if status is already set
+  if (onlineStatusCache.get(carpenterId) === online) {
+    if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+      console.log(`⚠️ Skipping duplicate online status update for ${carpenterId} - already ${online}`);
+    }
+    return; // Skip if same status already cached
+  }
+  
   return executeWriteOperation(`set_online_${carpenterId}_${online}`, async () => {
     try {
       const carpenterRef = doc(db, 'carpenters', carpenterId);
@@ -1060,7 +1248,12 @@ export const setCarpenterOnlineStatus = async (carpenterId: string, online: bool
         updatedAt: serverTimestamp()
       });
       
-      console.log(`Carpenter ${carpenterId} online status set to: ${online}`);
+      // Update cache after successful write
+      onlineStatusCache.set(carpenterId, online);
+      
+      if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+        console.log(`Carpenter ${carpenterId} online status set to: ${online}`);
+      }
     } catch (error) {
       console.error('Error updating carpenter online status:', error);
       throw error; // Let UI handle errors
@@ -1264,9 +1457,13 @@ export const updateCarpenterProfile = async (carpenterId: string, updatedFields:
       
       await updateDoc(carpenterRef, updateData);
       
-      console.log(`Carpenter ${carpenterId} profile updated with fields:`, Object.keys(updateData));
+      if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+        console.log(`Carpenter ${carpenterId} profile updated with fields:`, Object.keys(updateData));
+      }
     } catch (error) {
-      console.error('Error updating carpenter profile:', error);
+      if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+        console.error('Error updating carpenter profile:', error);
+      }
       throw error;
     }
   });
@@ -1298,9 +1495,13 @@ export const updateCustomerProfile = async (customerId: string, updatedFields: P
       // Use setDoc with merge: true to create document if it doesn't exist
       await setDoc(customerRef, updateData, { merge: true });
       
-      console.log(`Customer ${customerId} profile updated with fields:`, Object.keys(updateData));
+      if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+        console.log(`Customer ${customerId} profile updated with fields:`, Object.keys(updateData));
+      }
     } catch (error) {
-      console.error('Error updating customer profile:', error);
+      if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+        console.error('Error updating customer profile:', error);
+      }
       throw error;
     }
   });

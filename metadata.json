@@ -1,8 +1,0 @@
-{
-  "name": "MistryLocal",
-  "description": "Hyperlocal carpentry app connecting homeowners with verified carpenters for both small and large furniture jobs.",
-  "requestFramePermissions": [
-    "camera",
-    "geolocation"
-  ]
-}

@@ -60,6 +60,7 @@ export interface Carpenter {
   trustScore: number;
   recentTags?: string[];
   serviceAreas?: string[]; // Added for area-based matching
+  serviceArea?: string; // Primary service area for geographic restriction
   
   // NEW PROFESSIONAL DETAILS (optional)
   alternateMobileNumber?: string;
@@ -106,6 +107,7 @@ export interface Booking {
   isRated?: boolean;
   createdAt: number;
   pincode?: string; // Added for area-based matching
+  serviceArea?: string; // Service area for geographic restriction
   
   // RATING SUBMISSION TRACKING
   ratingSubmitted?: boolean; // Flag to indicate if rating has been submitted

@@ -1,4 +1,4 @@
-const CACHE_NAME = 'mistrylocal-v3';
+const CACHE_NAME = 'mistrylocal-v6';
 const urlsToCache = [
   '/',
   '/index.html',
@@ -25,6 +25,12 @@ self.addEventListener('fetch', (event) => {
 
   // For development, bypass service worker for localhost requests
   if (event.request.url.includes('localhost')) {
+    return;
+  }
+
+  // Allow normal network fetch for icon requests to prevent caching issues
+  if (event.request.url.includes('/icons/')) {
+    event.respondWith(fetch(event.request));
     return;
   }
 

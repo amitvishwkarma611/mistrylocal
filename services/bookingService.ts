@@ -14,6 +14,7 @@ import {
 } from 'firebase/firestore';
 import { db } from '../firebase';
 import { JobStatus } from '../types';
+import { getServiceAreaByPincode, RESTRICTED_AREA_MESSAGE } from '../serviceAreas';
 
 // GLOBAL WRITE OPERATION TRACKING
 // Prevent excessive write operations that could cause quota exhaustion
@@ -130,6 +131,7 @@ export interface BookingData {
   description: string;
   location: { lat: number; lng: number };
   pincode: string; // Added for area-based matching
+  serviceArea: string; // Service area for geographic restriction
   status: JobStatus;
   assignedCarpenterId?: string;
   assignedCarpenterName?: string;
@@ -150,9 +152,9 @@ export interface BookingData {
 }
 
 // Interface for job inbox item
-// Removed JobInboxItem interface - no longer needed with polling architecture
+// No longer needed with polling architecture
 
-// Removed calculateDistance function - no longer needed for area-based matching
+// No distance calculation function needed for area-based matching
 
 // Interface for carpenter data
 export interface CarpenterData {
@@ -165,6 +167,7 @@ export interface CarpenterData {
   city: string;
   rating: number;
   serviceAreas: string[]; // Added for area-based matching
+  serviceArea: string; // Primary service area for geographic restriction
   
   // FIELDS FROM Carpenter INTERFACE
   verified?: boolean;
@@ -223,15 +226,22 @@ const BASE_POLLING_INTERVAL = 8000; // 8 seconds for better responsiveness
 const MAX_POLLING_INTERVAL = 30000; // 30 seconds
 
 /**
- * Creates a new booking with area-based matching
+ * Creates a new booking with area-based matching and geographic restrictions
  * QUOTA-SAFE: Simple document creation, no distribution logic
  * @param bookingData - Booking information including pincode
  * @returns Promise with the created booking ID
  */
 export const createBookingWithDistribution = async (
-  bookingData: Omit<BookingData, 'id' | 'status' | 'createdAt' | 'assignedCarpenterId'>
+  bookingData: Omit<BookingData, 'id' | 'status' | 'createdAt' | 'assignedCarpenterId' | 'serviceArea'>
 ): Promise<string> => {
   console.log('📥 createBookingWithDistribution called with:', bookingData);
+  
+  // GEOGRAPHIC RESTRICTION: Validate service area
+  const serviceArea = getServiceAreaByPincode(bookingData.pincode);
+  
+  if (!serviceArea) {
+    throw new Error(RESTRICTED_AREA_MESSAGE);
+  }
   
   return executeWriteOperation('create_booking', async () => {
     console.log('📤 Creating booking document in Firestore...');
@@ -246,6 +256,7 @@ export const createBookingWithDistribution = async (
       description: bookingData.description,
       location: bookingData.location,
       pincode: bookingData.pincode,
+      serviceArea: serviceArea, // Add service area for geographic filtering
       status: JobStatus.SEARCHING,
       assignedCarpenterId: null,
       createdAt: serverTimestamp(),
@@ -255,6 +266,7 @@ export const createBookingWithDistribution = async (
     const bookingId = bookingRef.id;
     console.log('✅ Booking created with ID:', bookingId);
     console.log('📄 Booking document reference:', bookingRef.path);
+    console.log('📍 Service area:', serviceArea);
     
     return bookingId;
   });
@@ -369,7 +381,7 @@ export const acceptJobWithNotification = async (
   });
 };
 
-// Removed cleanupJobFromOtherInboxes - no longer needed with polling architecture
+// No inbox cleanup needed with polling architecture
 
 /**
  * Starts polling for searching bookings in carpenter's service areas
@@ -377,11 +389,13 @@ export const acceptJobWithNotification = async (
  * @param carpenterId - ID of the carpenter
  * @param serviceAreas - Array of pincodes/localities the carpenter serves
  * @param callback - Function to call with matching bookings
+ * @param serviceAreaFilter - Optional service area to filter by (e.g., "airoli")
  */
 export const startPollingSearchingBookings = (
   carpenterId: string,
   serviceAreas: string[],
-  callback: (bookings: BookingData[]) => void
+  callback: (bookings: BookingData[]) => void,
+  serviceAreaFilter?: string
 ): void => {
   // Stop existing polling if active
   if (pollingTimer) {
@@ -402,7 +416,7 @@ export const startPollingSearchingBookings = (
   isPollingActive = true;
   
   // Initial fetch
-  pollForBookings(serviceAreas);
+  pollForBookings(serviceAreas, serviceAreaFilter);
   
   // Set up polling with exponential backoff
   let currentInterval = BASE_POLLING_INTERVAL;
@@ -414,7 +428,7 @@ export const startPollingSearchingBookings = (
     
     pollingTimer = setInterval(() => {
       if (isPollingActive) {
-        pollForBookings(serviceAreas)
+        pollForBookings(serviceAreas, serviceAreaFilter)
           .then(() => {
             // Reset error count on successful poll
             pollingErrorCount = 0;
@@ -462,20 +476,26 @@ export const stopPollingSearchingBookings = (): void => {
 /**
  * Internal function to poll for searching bookings
  * @param serviceAreas - Array of pincodes to search in
+ * @param serviceAreaFilter - Specific service area to filter by (e.g., "airoli")
  */
-const pollForBookings = async (serviceAreas: string[]): Promise<void> => {
+const pollForBookings = async (serviceAreas: string[], serviceAreaFilter?: string): Promise<void> => {
   // Skip polling if we've hit too many errors
   if (pollingErrorCount > MAX_POLLING_ERRORS) {
     console.log('⏭️ Skipping poll due to error threshold exceeded');
     return;
   }
   try {
-    // Query for searching bookings in carpenter's service areas
-    const bookingsQuery = query(
+    // Build query with geographic filtering
+    let bookingsQuery = query(
       collection(db, 'bookings'),
       where('status', '==', JobStatus.SEARCHING),
       where('pincode', 'in', serviceAreas.slice(0, 10)) // Firestore 'in' query limit is 10
     );
+    
+    // Add service area filter if specified
+    if (serviceAreaFilter) {
+      bookingsQuery = query(bookingsQuery, where('serviceArea', '==', serviceAreaFilter));
+    }
     
     const snapshot = await getDocs(bookingsQuery);
     const bookings: BookingData[] = [];
@@ -489,6 +509,9 @@ const pollForBookings = async (serviceAreas: string[]): Promise<void> => {
     });
     
     console.log(`📊 Polled ${bookings.length} searching bookings`);
+    if (serviceAreaFilter) {
+      console.log(`📍 Filtered by service area: ${serviceAreaFilter}`);
+    }
     
     // Notify callback if available - ONLY for searching jobs
     if (pollingCallback) {
@@ -975,11 +998,11 @@ export const getWaveForBooking = (createdAt: any): number => {
   return 3;
 };
 
-// Removed listenForBookingUpdates - no longer needed with polling architecture
+// No real-time listeners needed with polling architecture
 
-// Removed listenForAssignedBookings - handled by subscribeToUserBookings
+// No assigned booking listeners needed with polling architecture
 
-// Removed listenForCarpenterStatus - handled by direct queries
+// No carpenter status listeners needed with direct queries
 
 /**
  * Creates a carpenter's profile in Firestore if it doesn't exist

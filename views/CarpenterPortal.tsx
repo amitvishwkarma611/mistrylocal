@@ -647,40 +647,6 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
           </div>
         </div>
       )}
-      
-      {/* Wallet Recharge Section */}
-      <div className="mb-8">
-        <div className="bg-white border border-gray-100 rounded-3xl p-5 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-lg font-black text-amber-900">Wallet Management</h3>
-          </div>
-          <div className="flex flex-col gap-3">
-            <div className="flex items-center justify-between p-3 bg-amber-50 rounded-2xl">
-              <span className="text-sm font-bold text-amber-900">Current Balance</span>
-              <span className="text-lg font-black text-amber-900">₹{walletBalance}</span>
-            </div>
-            <button
-              onClick={async () => {
-                if (!user?.uid) return;
-                try {
-                  const { rechargeWallet } = await import('../services/walletService');
-                  await rechargeWallet(user.uid, 500);
-                  // Refresh balance display
-                  const balance = await getWalletBalance(user.uid);
-                  setWalletBalance(balance);
-                  alert('₹500 added to your wallet!');
-                } catch (error) {
-                  console.error('Error recharging wallet:', error);
-                  alert('Failed to recharge wallet. Please try again.');
-                }
-              }}
-              className="w-full py-3 bg-gradient-to-r from-amber-600 to-orange-600 text-white rounded-2xl font-bold text-sm shadow-md flex items-center justify-center gap-2 hover:shadow-lg active:scale-95 transition-all"
-            >
-              <IndianRupee size={16} /> Add ₹500 Test Balance
-            </button>
-          </div>
-        </div>
-      </div>
 
       {/* Cancelled Jobs Section */}
       {cancelledJobs.length > 0 && (

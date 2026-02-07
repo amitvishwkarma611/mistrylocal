@@ -1,12 +1,12 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Star, BadgeCheck, Phone, CheckCircle, Clock, MapPin, IndianRupee, Navigation, MessageSquare, Hammer, Zap, AlertCircle, Radar, ChevronRight, History, X } from 'lucide-react';
+import { Star, BadgeCheck, Phone, CheckCircle, Clock, MapPin, IndianRupee, Navigation, MessageSquare, Hammer, Zap, AlertCircle, Radar, ChevronRight, History, X, Gift } from 'lucide-react';
 import { Booking, JobStatus, AppRole, Carpenter } from '../types';
 import { translations } from '../translations';
 import { setCarpenterOnlineStatus, startPollingSearchingBookings, stopPollingSearchingBookings, acceptJob, createOrUpdateCarpenter, BookingData } from '../services/bookingService';
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
-import { getWalletBalance } from '../services/walletService';
+import { getWalletBalance, getWalletInfo } from '../services/walletService';
 
 interface CarpenterPortalProps {
   bookings: Booking[];
@@ -26,7 +26,8 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
   const [isWorking, setIsWorking] = useState(false); // Track work start state
   const [isFinishing, setIsFinishing] = useState(false); // Track job finish state
   const [carpenterProfile, setCarpenterProfile] = useState<Carpenter | null>(null);
-  const [walletBalance, setWalletBalance] = useState<number>(0); // Wallet balance state
+  const [walletBalance, setWalletBalance] = useState<number>(0);
+  const [showWelcomeMessage, setShowWelcomeMessage] = useState<boolean>(false); // Wallet balance state
   
   // Initialize carpenter profile only once when component mounts (UBER-STYLE)
   useEffect(() => {
@@ -123,6 +124,16 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
         try {
           const balance = await getWalletBalance(user.uid);
           setWalletBalance(balance);
+          
+          // Show welcome message if balance is exactly 200 (welcome credit)
+          if (balance === 200) {
+            const walletInfo = await getWalletInfo(user.uid);
+            if (walletInfo?.welcomeCreditGiven) {
+              setShowWelcomeMessage(true);
+              // Auto-hide after 5 seconds
+              setTimeout(() => setShowWelcomeMessage(false), 5000);
+            }
+          }
         } catch (error) {
           console.error('Error fetching wallet balance:', error);
         }
@@ -322,6 +333,28 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
               <span className="text-[10px] font-black text-gray-500 uppercase tracking-widest">Wallet Balance</span>
               <span className="text-sm font-bold text-amber-900">₹{walletBalance}</span>
             </div>
+            
+            {/* Welcome Credit Message */}
+            {showWelcomeMessage && (
+              <div className="mt-3 p-3 bg-gradient-to-r from-green-50 to-emerald-50 rounded-xl border border-green-200 animate-in slide-in-from-top-2 duration-500">
+                <div className="flex items-start gap-2">
+                  <div className="p-1 bg-green-100 rounded-lg">
+                    <Gift size={16} className="text-green-600" />
+                  </div>
+                  <div>
+                    <p className="text-xs font-black text-green-700 uppercase tracking-widest mb-1">Welcome Bonus!</p>
+                    <p className="text-sm font-bold text-green-800">₹200 credited to your wallet</p>
+                    <p className="text-xs text-green-600 mt-1">Use this credit to accept your first jobs!</p>
+                  </div>
+                  <button 
+                    onClick={() => setShowWelcomeMessage(false)}
+                    className="ml-auto p-1 text-green-500 hover:text-green-700"
+                  >
+                    <X size={16} />
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

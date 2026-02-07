@@ -3,6 +3,7 @@ import React, { useState, useEffect, useRef } from 'react';
 import { AppRole } from '../types';
 import { Language, translations } from '../translations';
 import { auth, db, RecaptchaVerifier, signInWithPhoneNumber, signInWithEmailAndPassword, createUserWithEmailAndPassword, doc, getDoc, setDoc, serverTimestamp } from '../firebase';
+import { giveWelcomeCreditIfFirstLogin } from '../services/walletService';
 import { ArrowRight, Phone, Mail, ShieldCheck, User, Hammer, ChevronLeft, Smartphone, AtSign, Loader2 } from 'lucide-react';
 
 interface AuthFlowProps {
@@ -153,6 +154,15 @@ const AuthFlow: React.FC<AuthFlowProps> = ({ onLogin, language, setLanguage, t }
           createdAt: serverTimestamp(),
           profileComplete: true
         });
+        
+        // Give welcome credit for first-time users (only for carpenters)
+        if (selectedRole === AppRole.CARPENTER) {
+          try {
+            await giveWelcomeCreditIfFirstLogin(user.uid, 'carpenter');
+          } catch (error) {
+            console.error('Failed to give welcome credit:', error);
+          }
+        }
       } else {
         const userData = userDoc.data();
         finalRole = userData.role as AppRole;
@@ -198,6 +208,15 @@ const AuthFlow: React.FC<AuthFlowProps> = ({ onLogin, language, setLanguage, t }
           createdAt: serverTimestamp()
         });
 
+        // Give welcome credit for first-time users (only for carpenters)
+        if (selectedRole === AppRole.CARPENTER) {
+          try {
+            await giveWelcomeCreditIfFirstLogin(user.uid, 'carpenter');
+          } catch (error) {
+            console.error('Failed to give welcome credit:', error);
+          }
+        }
+
         onLogin(selectedRole!, user.email!, name, user.uid);
       } else {
         // Sign in with email and password
@@ -223,6 +242,15 @@ const AuthFlow: React.FC<AuthFlowProps> = ({ onLogin, language, setLanguage, t }
             name: name,
             createdAt: serverTimestamp()
           });
+          
+          // Give welcome credit for first-time users (only for carpenters)
+          if (selectedRole === AppRole.CARPENTER) {
+            try {
+              await giveWelcomeCreditIfFirstLogin(user.uid, 'carpenter');
+            } catch (error) {
+              console.error('Failed to give welcome credit:', error);
+            }
+          }
         } else {
           // Use existing user data
           const userData = userDoc.data();

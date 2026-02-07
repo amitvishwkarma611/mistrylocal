@@ -409,38 +409,38 @@ export const acceptJobWithNotification = async (
           throw new Error('JOB_ALREADY_TAKEN');
         }
         
-        // STEP 2 — READ carpenter profile
-        const carpenterSnapshot = await transaction.get(carpenterRef);
+        // STEP 2 — READ worker profile
+        const workerSnapshot = await transaction.get(workerRef);
         
-        if (!carpenterSnapshot.exists()) {
-          throw new Error('CARPENTER_DOES_NOT_EXIST');
+        if (!workerSnapshot.exists()) {
+          throw new Error('WORKER_DOES_NOT_EXIST');
         }
         
-        const carpenterData = carpenterSnapshot.data() as any;
+        const workerData = workerSnapshot.data() as any;
         
-        // if carpenter.activeJobId exists → throw "CARPENTER_BUSY"
-        if (carpenterData.activeJobId) {
+        // if worker.activeJobId exists → throw "WORKER_BUSY"
+        if (workerData.activeJobId) {
           // Check if the active job in Firestore still exists and is still active
-          // If the job doesn't exist or is no longer active, we should clear the carpenter's activeJobId
-          const activeBookingRef = doc(db, 'bookings', carpenterData.activeJobId);
+          // If the job doesn't exist or is no longer active, we should clear the worker's activeJobId
+          const activeBookingRef = doc(db, 'bookings', workerData.activeJobId);
           const activeBookingSnapshot = await transaction.get(activeBookingRef);
           
           if (!activeBookingSnapshot.exists()) {
-            // Active job doesn't exist in Firestore, clear carpenter's activeJobId
-            transaction.update(carpenterRef, {
+            // Active job doesn't exist in Firestore, clear worker's activeJobId
+            transaction.update(workerRef, {
               activeJobId: null,
               isAvailable: true,
               updatedAt: serverTimestamp()
             });
           } else {
             const activeBookingData = activeBookingSnapshot.data() as BookingData;
-            // If the job exists but is no longer in an active state, clear carpenter's activeJobId
+            // If the job exists but is no longer in an active state, clear worker's activeJobId
             if (activeBookingData.status !== JobStatus.ACCEPTED && 
                 activeBookingData.status !== JobStatus.ON_THE_WAY &&
                 activeBookingData.status !== JobStatus.ARRIVED &&
                 activeBookingData.status !== JobStatus.WORK_IN_PROGRESS) {
-              // Job is no longer active, clear carpenter's activeJobId
-              transaction.update(carpenterRef, {
+              // Job is no longer active, clear worker's activeJobId
+              transaction.update(workerRef, {
                 activeJobId: null,
                 isAvailable: true,
                 updatedAt: serverTimestamp()
@@ -448,9 +448,9 @@ export const acceptJobWithNotification = async (
               // Update local tracking to reflect the cleared active job
               carpenterActiveJobs.delete(carpenterId);
             } else {
-              // The carpenter truly has an active job, update local tracking and throw error
-              carpenterActiveJobs.set(carpenterId, carpenterData.activeJobId);
-              throw new Error('CARPENTER_BUSY');
+              // The worker truly has an active job, update local tracking and throw error
+              carpenterActiveJobs.set(carpenterId, workerData.activeJobId);
+              throw new Error('WORKER_BUSY');
             }
           }
         }
@@ -459,8 +459,8 @@ export const acceptJobWithNotification = async (
         // booking.status = "ACCEPTED"
         // booking.mistryId = carpenterId  
         // booking.acceptedAt = serverTimestamp()
-        // carpenter.activeJobId = bookingId
-        // carpenter.isAvailable = false
+        // worker.activeJobId = bookingId
+        // worker.isAvailable = false
         transaction.update(bookingRef, {
           status: JobStatus.ACCEPTED,
           assignedCarpenterId: carpenterId,
@@ -469,7 +469,7 @@ export const acceptJobWithNotification = async (
           updatedAt: serverTimestamp()
         });
         
-        transaction.update(carpenterRef, {
+        transaction.update(workerRef, {
           activeJobId: bookingId,
           isAvailable: false,
           updatedAt: serverTimestamp()

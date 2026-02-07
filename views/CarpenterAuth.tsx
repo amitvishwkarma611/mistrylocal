@@ -3,6 +3,7 @@ import { AppRole } from '../types';
 import { Language, translations } from '../translations';
 import { auth, db, RecaptchaVerifier, signInWithPhoneNumber, signInWithEmailAndPassword, createUserWithEmailAndPassword, doc, getDoc, setDoc, serverTimestamp } from '../firebase';
 import { ArrowRight, Phone, Mail, ShieldCheck, Hammer, ChevronLeft, Smartphone, AtSign, Loader2 } from 'lucide-react';
+import { giveWelcomeCreditIfFirstLogin } from '../services/walletService';
 
 interface CarpenterAuthProps {
   onLogin: (role: AppRole, identifier: string, name: string, uid: string) => void;
@@ -132,6 +133,13 @@ const CarpenterAuth: React.FC<CarpenterAuthProps> = ({ onLogin, language, setLan
           createdAt: serverTimestamp(),
           profileComplete: true
         });
+        
+        // Give welcome credit for first-time carpenters
+        try {
+          await giveWelcomeCreditIfFirstLogin(user.uid, 'carpenter');
+        } catch (error) {
+          console.error('Failed to give welcome credit:', error);
+        }
       } else {
         const userData = userDoc.data();
         name = userData.name || "Carpenter User";
@@ -176,6 +184,13 @@ const CarpenterAuth: React.FC<CarpenterAuthProps> = ({ onLogin, language, setLan
           createdAt: serverTimestamp()
         });
 
+        // Give welcome credit for first-time carpenters
+        try {
+          await giveWelcomeCreditIfFirstLogin(user.uid, 'carpenter');
+        } catch (error) {
+          console.error('Failed to give welcome credit:', error);
+        }
+
         onLogin(AppRole.CARPENTER, user.email!, name, user.uid);
       } else {
         // Sign in with email and password
@@ -198,6 +213,13 @@ const CarpenterAuth: React.FC<CarpenterAuthProps> = ({ onLogin, language, setLan
             name: name,
             createdAt: serverTimestamp()
           });
+          
+          // Give welcome credit for first-time carpenters
+          try {
+            await giveWelcomeCreditIfFirstLogin(user.uid, 'carpenter');
+          } catch (error) {
+            console.error('Failed to give welcome credit:', error);
+          }
         } else {
           // Use existing user data
           const userData = userDoc.data();

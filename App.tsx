@@ -13,6 +13,8 @@ import { translations, Language } from './translations';
 import { Home, User, Bell, Briefcase, RefreshCcw, Hammer, ShieldCheck, Star, Wrench, Zap } from 'lucide-react';
 import { subscribeToUserBookings, updateBookingStatus as updateBookingStatusFirestore, cancelBooking, releaseCarpenterJob, startBookingJob } from './services/bookingService';
 import { applyMinimumPrice } from './services/priceService';
+import { auth } from './firebase'; // Import auth
+import { onAuthStateChanged } from 'firebase/auth'; // Import onAuthStateChanged
 
 // Extend Window interface to include our custom properties
 declare global {
@@ -30,7 +32,7 @@ const INITIAL_BOOKINGS: Booking[] = [];
 
 const App: React.FC = () => {
   const [user, setUser] = useState<{ role: AppRole; name: string; phone: string; uid: string } | null>(null);
-  const [showAuth, setShowAuth] = useState<boolean>(false);
+  const [showAuth, setShowAuth] = useState<boolean>(true); // Start with auth screen
   const [authRole, setAuthRole] = useState<AppRole | null>(null);
   const [selectedProfession, setSelectedProfession] = useState<string | null>(null); // Track selected profession
   
@@ -49,6 +51,48 @@ const App: React.FC = () => {
   
   // In-memory set to track processed booking IDs
   const processedBookingIds = new Set<string>();
+
+  // Authentication state listener
+  useEffect(() => {
+    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
+      if (firebaseUser) {
+        try {
+          // Import Firestore functions locally to avoid circular dependencies
+          const { doc, getDoc } = await import('firebase/firestore');
+          const { db } = await import('./firebase');
+          
+          // Fetch user document from Firestore
+          const userDocRef = doc(db, "users", firebaseUser.uid);
+          const userDoc = await getDoc(userDocRef);
+          
+          if (userDoc.exists()) {
+            const userData = userDoc.data();
+            setUser({
+              role: userData.role as AppRole,
+              name: userData.name || "User",
+              phone: userData.phone || firebaseUser.phoneNumber || "",
+              uid: firebaseUser.uid
+            });
+            setShowAuth(false); // Hide auth screen when logged in
+          } else {
+            // User exists in Firebase Auth but not in Firestore
+            // Show auth screen to complete profile
+            setShowAuth(true);
+          }
+        } catch (error) {
+          console.error("Error fetching user data:", error);
+          setShowAuth(true); // Show auth screen on error
+        }
+      } else {
+        // User is not authenticated
+        setUser(null);
+        setShowAuth(true); // Show auth screen
+      }
+    });
+
+    // Cleanup subscription on unmount
+    return () => unsubscribe();
+  }, []);
   
   // Fetch carpenter profile for carpenter users
   useEffect(() => {

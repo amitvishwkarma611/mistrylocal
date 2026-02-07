@@ -1,45 +1,136 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
-    // Allow read/write access to the app for users
+
+    // =========================
+    // Helpers
+    // =========================
+    function isLoggedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isLoggedIn() && request.auth.uid == userId;
+    }
+
+    function isValidProfession() {
+      return resource.data.profession in ['carpenter', 'plumber', 'electrician'];
+    }
+
+    // =========================
+    // Users collection (restore for auth)
+    // =========================
+    match /users/{userId} {
+      allow read, write: if isOwner(userId);
+    }
+
+    // =========================
+    // Carpenters collection (existing)
+    // =========================
     match /carpenters/{carpenterId} {
-      allow read: if request.auth != null;
-      allow write: if request.auth != null && request.auth.uid == carpenterId;
+      allow read: if isLoggedIn();
+      allow write: if isOwner(carpenterId);
+    }
+
+    // =========================
+    // Customers collection (missing)
+    // =========================
+    match /customers/{customerId} {
+      allow read: if isLoggedIn();
+      allow write: if isOwner(customerId);
+    }
+
+    // =========================
+    // Workers collection (generic for all professions)
+    // =========================
+    match /workers/{workerId} {
+      // Worker apna profile read/write kar sakta hai
+      allow read, update: if isOwner(workerId);
+
+      // Create only once with valid profession
+      allow create: if isOwner(workerId) && isValidProfession();
+
+      // Wallet balance frontend se change nahi ho sakta
+      allow update: if isOwner(workerId)
+        && request.resource.data.walletBalance == resource.data.walletBalance;
+    }
+
+    // =========================
+    // Wallet collections for different professions
+    // =========================
+    match /carpenter_wallets/{workerId} {
+      allow read: if isOwner(workerId);
+      allow create, update: if false; // Only backend can modify
     }
     
-    match /bookings/{bookingId} {
-      // Allow read access for all authenticated users
-      allow read: if request.auth != null;
-      // Allow write only for authenticated users
-      allow write: if request.auth != null;
-      // Only allow creation of new bookings with SEARCHING status
-      allow create: if request.auth != null && 
-                    request.resource.data.status == 'SEARCHING';
-      // Only allow status updates to valid transitions
-      allow update: if request.auth != null &&
-                     isValidStatusTransition(request.resource.data.status, 
-                                           resource.data.status) &&
-                     isAuthorizedToUpdate(request.auth.uid, resource.data);
+    match /plumber_wallets/{workerId} {
+      allow read: if isOwner(workerId);
+      allow create, update: if false; // Only backend can modify
     }
+    
+    match /electrician_wallets/{workerId} {
+      allow read: if isOwner(workerId);
+      allow create, update: if false; // Only backend can modify
+    }
+
+    // =========================
+    // Bookings collection
+    // =========================
+    match /bookings/{bookingId} {
+      // Customer apni booking create kar sakta hai
+      allow create: if isLoggedIn()
+        && request.resource.data.customerId == request.auth.uid;
+
+      // Customer apni booking read kar sakta hai
+      allow read: if isLoggedIn()
+        && (
+          resource.data.customerId == request.auth.uid ||
+          resource.data.mistryId == request.auth.uid
+        );
+
+      // Carpenter/Plumber/Electrician job accept kar sakta hai
+      allow update: if isLoggedIn()
+        && resource.data.status == "SEARCHING"
+        && request.resource.data.status == "ACCEPTED"
+        && request.resource.data.mistryId == request.auth.uid;
+
+      // Job complete sirf assigned worker hi kar sakta hai
+      allow update: if isLoggedIn()
+        && resource.data.mistryId == request.auth.uid
+        && resource.data.status == "ACCEPTED"
+        && request.resource.data.status == "COMPLETED";
+
+      // Cancel only customer or system
+      allow update: if isLoggedIn()
+        && (
+          resource.data.customerId == request.auth.uid ||
+          resource.data.mistryId == request.auth.uid
+        );
+    }
+
+    // =========================
+    // Wallet Transactions
+    // =========================
+    match /wallet_transactions/{txnId} {
+      // Worker sirf apne transactions dekh sakta hai
+      allow read: if isLoggedIn()
+        && resource.data.workerId == request.auth.uid;
+
+      // Frontend se transaction create/update/delete block
+      allow write: if false;
+    }
+
+    // =========================
+    // Payment Orders (for Razorpay integration)
+    // =========================
+    match /payment_orders/{orderId} {
+      // Users can read their own payment orders
+      allow read: if isLoggedIn() 
+        && resource.data.userId == request.auth.uid;
+      
+      // Only backend can create/update payment orders
+      allow create, update: if false;
+    }
+
   }
-}
-
-// Helper function to validate status transitions
-function isValidStatusTransition(newStatus, oldStatus) {
-  // Define valid status transitions
-  return (oldStatus == 'SEARCHING' && 
-          (newStatus == 'ACCEPTED' || newStatus == 'CANCELLED')) ||
-         (oldStatus == 'ACCEPTED' && 
-          (newStatus == 'ON_THE_WAY' || newStatus == 'CANCELLED')) ||
-         (oldStatus == 'ON_THE_WAY' && 
-          (newStatus == 'ARRIVED' || newStatus == 'CANCELLED')) ||
-         (oldStatus == 'ARRIVED' && 
-          (newStatus == 'WORK_IN_PROGRESS' || newStatus == 'CANCELLED')) ||
-         (oldStatus == 'WORK_IN_PROGRESS' && newStatus == 'COMPLETED');
-}
-
-// Helper function to check if user is authorized to update booking
-function isAuthorizedToUpdate(userId, bookingData) {
-  // Carpenters can update their assigned bookings
-  return bookingData.assignedCarpenterId == userId;
 }

@@ -43,7 +43,7 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
             name: user.name,
             phone: user.phone,
             online: true,
-            services: ['Furniture Repair', 'Installation', 'Custom Work'],
+            services: ['carpenter'], // Default to carpenter service
             location: { lat: 19.1709, lng: 72.9966 }, // Airoli location
             city: 'Mumbai',
             rating: 4.9,
@@ -178,6 +178,7 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
     console.log('🚀 Starting polling for searching bookings');
     
     // START POLLING - runs every 10-15 seconds
+    const carpenterServices = carpenterProfile?.services || ['carpenter']; // Default to carpenter for backward compatibility
     startPollingSearchingBookings(
       user.uid,
       serviceAreas,
@@ -222,7 +223,8 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
           return hasChanges ? sortedJobs : prevJobs;
         });
       },
-      'airoli' // Filter by airoli service area
+      'airoli', // Filter by airoli service area
+      carpenterServices // Pass carpenter services for filtering
     );
     
     // Mark that this component started polling

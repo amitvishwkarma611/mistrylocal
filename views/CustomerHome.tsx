@@ -6,6 +6,8 @@ import { Booking, JobStatus, Carpenter, AppRole } from '../types';
 import { translations, Language } from '../translations';
 import { Camera, Star, BadgeCheck, Loader2, X, ArrowRight, Hammer, PenLine, Radar, Zap, MessageSquare, Phone, Navigation, ChevronRight, CheckSquare, Square, CheckCircle as CheckCircle2, IndianRupee, Clock } from 'lucide-react';
 import { createBooking } from '../services/bookingService';
+import { SERVICE_LIST } from '../data/serviceList';
+import { applyMinimumPrice } from '../services/priceService';
 
 interface CustomerHomeProps {
   onBook: (booking: Booking) => void;
@@ -24,6 +26,7 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
   const [selectedServiceIds, setSelectedServiceIds] = useState<string[]>([]);
   const [customIssue, setCustomIssue] = useState('');
   const [isCustomMode, setIsCustomMode] = useState(false);
+  const [selectedServiceType, setSelectedServiceType] = useState<'carpenter' | 'plumber' | 'electrician'>('carpenter');
   // Removed location state - using area-based matching only
   const [selectedArea, setSelectedArea] = useState('Airoli, Mumbai');
   
@@ -202,6 +205,54 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
     return cat.name;
   }
 
+  // Function to get services based on selected service type
+  const getServicesForType = () => {
+    if (selectedServiceType === 'carpenter') {
+      return SERVICES;
+    } else if (selectedServiceType === 'plumber') {
+      // Create service objects for plumber services
+      return SERVICE_LIST.plumber.map((service, index) => ({
+        id: `plumber-${index}`,
+        title: service,
+        titleHindi: service, // Placeholder - would need translation
+        titlePunjabi: service, // Placeholder - would need translation
+        description: 'Plumbing service',
+        icon: 'Hammer', // Using hammer as placeholder
+        basePrice: 500, // Default price for plumbing
+        category: 'repair'
+      }));
+    } else if (selectedServiceType === 'electrician') {
+      // Create service objects for electrician services
+      return SERVICE_LIST.electrician.map((service, index) => ({
+        id: `electrician-${index}`,
+        title: service,
+        titleHindi: service, // Placeholder - would need translation
+        titlePunjabi: service, // Placeholder - would need translation
+        description: 'Electrical service',
+        icon: 'Hammer', // Using hammer as placeholder
+        basePrice: 550, // Default price for electrical
+        category: 'repair'
+      }));
+    }
+    return SERVICES; // Default to carpenter services
+  };
+
+  // Function to get categories based on selected service type
+  const getCategoriesForType = () => {
+    if (selectedServiceType === 'carpenter') {
+      return CATEGORIES;
+    } else {
+      // For plumber/electrician, create a general category
+      return [{
+        id: 'general',
+        name: selectedServiceType.charAt(0).toUpperCase() + selectedServiceType.slice(1),
+        emoji: selectedServiceType === 'plumber' ? '🔧' : '⚡',
+        nameHindi: selectedServiceType,
+        namePunjabi: selectedServiceType
+      }];
+    }
+  };
+
 
 
   const handleBooking = async (ids?: string[], user?: { role: AppRole; name: string; phone: string; uid: string }) => {
@@ -218,7 +269,9 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
     setCreatingBooking(true);
     
     const sIds = ids || selectedServiceIds;
-    const selected = SERVICES.filter(s => sIds.includes(s.id));
+    // Get services based on the selected service type
+    const allServices = getServicesForType();
+    const selected = allServices.filter(s => sIds.includes(s.id));
     
     console.log('📋 Selected services:', selected);
     
@@ -238,7 +291,8 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
       } else {
         text = getServiceTitle(selected[0]);
       }
-      totalPrice = selected.reduce((acc, s) => acc + (s.basePrice || 0), 0);
+      const rawTotal = selected.reduce((acc, s) => acc + (s.basePrice || 0), 0);
+      totalPrice = applyMinimumPrice(selectedServiceType, rawTotal);
     } else {
       console.warn('⚠️ No services selected for booking');
       setCreatingBooking(false);
@@ -267,7 +321,8 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
           lat: 19.1709,  // Airoli latitude
           lng: 72.9966   // Airoli longitude
         },
-        pincode: '400707'
+        pincode: '400707',
+        serviceType: selectedServiceType
       });
       
       console.log('✅ Booking created successfully with ID:', bookingId);
@@ -314,9 +369,12 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
     }
   };
 
-  const calculatedTotal = SERVICES
+  // Get services based on selected service type for total calculation
+  const servicesForCalculation = getServicesForType();
+  const rawTotal = servicesForCalculation
     .filter(s => selectedServiceIds.includes(s.id))
     .reduce((acc, s) => acc + (s.basePrice || 0), 0);
+  const calculatedTotal = applyMinimumPrice(selectedServiceType, rawTotal);
 
   // Removed map view - using simple area selection instead
 
@@ -490,45 +548,112 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
         <h3 className="text-lg font-black text-amber-900">{t('choose_service')}</h3>
       </div>
 
-      {CATEGORIES.map(cat => (
-        <div key={cat.id} className="mb-8">
-          <h4 className="text-[10px] font-black uppercase text-orange-600 tracking-widest px-1 mb-3 flex items-center gap-2">
-            <span>{cat.emoji}</span> {getCategoryName(cat)}
-          </h4>
-          <div className="grid grid-cols-2 gap-3">
-            {SERVICES.filter(s => s.category === cat.id).map(service => {
-              const isSelected = selectedServiceIds.includes(service.id);
-              return (
-                <button 
-                  key={service.id} 
-                  onClick={() => toggleService(service.id)} 
-                  className={`p-3.5 rounded-2xl border transition-all text-left flex flex-col gap-2 group relative h-full ${isSelected ? 'bg-orange-50 border-orange-500 shadow-inner scale-[0.98]' : 'bg-white border-gray-100 hover:border-orange-200 hover:shadow-md active:scale-95'}`}
-                >
-                  <div className="absolute top-2 right-2">
-                    {isSelected ? <CheckSquare size={16} className="text-orange-600" /> : <Square size={16} className="text-gray-200 group-hover:text-orange-100" />}
-                  </div>
-                  <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${isSelected ? 'bg-orange-600 text-white' : 'bg-orange-50 text-orange-600'}`}>
-                    {getIcon(service.icon, "size-5")}
-                  </div>
-                  <div className="flex-1">
-                     <p className={`text-[11px] font-bold leading-tight ${isSelected ? 'text-orange-900' : 'text-amber-900'}`}>
-                      {getServiceTitle(service)}
-                    </p>
-                    <p className={`text-[8px] font-medium mt-0.5 mb-2 ${isSelected ? 'text-orange-700/60' : 'text-gray-400'}`}>{service.description}</p>
-                  </div>
-                  <div className="flex items-center justify-between mt-auto pt-2 border-t border-gray-50 w-full">
-                    {service.basePrice ? (
-                      <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-md uppercase ${isSelected ? 'bg-orange-600 text-white' : 'bg-amber-50 text-amber-600'}`}>
-                        ₹{service.basePrice}
-                      </span>
-                    ) : <span></span>}
-                  </div>
-                </button>
-              );
-            })}
-          </div>
+      {/* Service Type Selection */}
+      <div className="mb-6 bg-white rounded-2xl p-4 border border-gray-100 shadow-sm">
+        <h4 className="text-[10px] font-black uppercase text-orange-600 tracking-widest mb-3">Select Service Type</h4>
+        <div className="grid grid-cols-3 gap-2">
+          <button
+            onClick={() => setSelectedServiceType('carpenter')}
+            className={`p-3 rounded-xl border transition-all text-center ${
+              selectedServiceType === 'carpenter' 
+                ? 'bg-orange-50 border-orange-500 shadow-inner' 
+                : 'bg-gray-50 border-gray-200 hover:border-orange-200'
+            }`}
+          >
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center mx-auto mb-2 ${
+              selectedServiceType === 'carpenter' ? 'bg-orange-600 text-white' : 'bg-gray-200 text-gray-600'
+            }`}>
+              <Hammer size={16} />
+            </div>
+            <span className={`text-[10px] font-bold ${selectedServiceType === 'carpenter' ? 'text-orange-900' : 'text-gray-600'}`}>
+              Carpenter
+            </span>
+          </button>
+          
+          <button
+            onClick={() => setSelectedServiceType('plumber')}
+            className={`p-3 rounded-xl border transition-all text-center ${
+              selectedServiceType === 'plumber' 
+                ? 'bg-blue-50 border-blue-500 shadow-inner' 
+                : 'bg-gray-50 border-gray-200 hover:border-blue-200'
+            }`}
+          >
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center mx-auto mb-2 ${
+              selectedServiceType === 'plumber' ? 'bg-blue-600 text-white' : 'bg-gray-200 text-gray-600'
+            }`}>
+              <span className="text-lg font-bold">🔧</span>
+            </div>
+            <span className={`text-[10px] font-bold ${selectedServiceType === 'plumber' ? 'text-blue-900' : 'text-gray-600'}`}>
+              Plumber
+            </span>
+          </button>
+          
+          <button
+            onClick={() => setSelectedServiceType('electrician')}
+            className={`p-3 rounded-xl border transition-all text-center ${
+              selectedServiceType === 'electrician' 
+                ? 'bg-yellow-50 border-yellow-500 shadow-inner' 
+                : 'bg-gray-50 border-gray-200 hover:border-yellow-200'
+            }`}
+          >
+            <div className={`w-8 h-8 rounded-lg flex items-center justify-center mx-auto mb-2 ${
+              selectedServiceType === 'electrician' ? 'bg-yellow-600 text-white' : 'bg-gray-200 text-gray-600'
+            }`}>
+              <span className="text-lg font-bold">⚡</span>
+            </div>
+            <span className={`text-[10px] font-bold ${selectedServiceType === 'electrician' ? 'text-yellow-900' : 'text-gray-600'}`}>
+              Electrician
+            </span>
+          </button>
         </div>
-      ))}
+      </div>
+
+      {getCategoriesForType().map(cat => {
+        // Get services for this category based on selected service type
+        const servicesForCategory = selectedServiceType === 'carpenter' 
+          ? SERVICES.filter(s => s.category === cat.id)
+          : getServicesForType();
+
+        return (
+          <div key={cat.id} className="mb-8">
+            <h4 className="text-[10px] font-black uppercase text-orange-600 tracking-widest px-1 mb-3 flex items-center gap-2">
+              <span>{cat.emoji}</span> {getCategoryName(cat)}
+            </h4>
+            <div className="grid grid-cols-2 gap-3">
+              {servicesForCategory.map(service => {
+                const isSelected = selectedServiceIds.includes(service.id);
+                return (
+                  <button 
+                    key={service.id} 
+                    onClick={() => toggleService(service.id)} 
+                    className={`p-3.5 rounded-2xl border transition-all text-left flex flex-col gap-2 group relative h-full ${isSelected ? 'bg-orange-50 border-orange-500 shadow-inner scale-[0.98]' : 'bg-white border-gray-100 hover:border-orange-200 hover:shadow-md active:scale-95'}`}
+                  >
+                    <div className="absolute top-2 right-2">
+                      {isSelected ? <CheckSquare size={16} className="text-orange-600" /> : <Square size={16} className="text-gray-200 group-hover:text-orange-100" />}
+                    </div>
+                    <div className={`w-8 h-8 rounded-xl flex items-center justify-center shrink-0 ${isSelected ? 'bg-orange-600 text-white' : 'bg-orange-50 text-orange-600'}`}>
+                      {getIcon(service.icon, "size-5")}
+                    </div>
+                    <div className="flex-1">
+                       <p className={`text-[11px] font-bold leading-tight ${isSelected ? 'text-orange-900' : 'text-amber-900'}`}>
+                        {getServiceTitle(service)}
+                      </p>
+                      <p className={`text-[8px] font-medium mt-0.5 mb-2 ${isSelected ? 'text-orange-700/60' : 'text-gray-400'}`}>{service.description}</p>
+                    </div>
+                    <div className="flex items-center justify-between mt-auto pt-2 border-t border-gray-50 w-full">
+                      {service.basePrice ? (
+                        <span className={`text-[8px] font-black px-1.5 py-0.5 rounded-md uppercase ${isSelected ? 'bg-orange-600 text-white' : 'bg-amber-50 text-amber-600'}`}>
+                          ₹{service.basePrice}
+                        </span>
+                      ) : <span></span>}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
 
 
 

@@ -508,6 +508,18 @@ const CarpenterProfileEdit: React.FC<CarpenterProfileEditProps> = ({
         </div>
       </div>
 
+      {/* Services Display - Plain text only */}
+      {carpenterProfile?.services && carpenterProfile.services.length > 0 && (
+        <div className="bg-amber-50 p-4 rounded-2xl border border-amber-100 mb-6">
+          <p className="text-[10px] font-black uppercase text-amber-800 tracking-widest mb-2">Services</p>
+          <p className="text-sm font-bold text-amber-900">
+            {carpenterProfile.services.map(service => 
+              service.charAt(0).toUpperCase() + service.slice(1)
+            ).join(', ')}
+          </p>
+        </div>
+      )}
+
       {/* Performance Stats */}
       <div className="grid grid-cols-2 gap-5 pt-8 border-t border-gray-200 mt-8">
         <div className="text-center p-5 bg-gradient-to-br from-gray-50 to-gray-100 rounded-2xl border border-gray-200 shadow-sm hover:shadow-md transition-shadow">

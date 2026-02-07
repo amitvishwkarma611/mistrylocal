@@ -15,6 +15,7 @@ import {
 import { db } from '../firebase';
 import { JobStatus } from '../types';
 import { getServiceAreaByPincode, RESTRICTED_AREA_MESSAGE } from '../serviceAreas';
+import { getProfessionCollection, getWorkerProfessionSafe } from './professionService';
 
 // GLOBAL WRITE OPERATION TRACKING
 // Prevent excessive write operations that could cause quota exhaustion
@@ -141,6 +142,7 @@ export interface BookingData {
   location: { lat: number; lng: number };
   pincode: string; // Added for area-based matching
   serviceArea: string; // Service area for geographic restriction
+  serviceType?: string; // Service type: "carpenter" | "plumber" | "electrician" (optional for backward compatibility)
   status: JobStatus;
   assignedCarpenterId?: string;
   assignedCarpenterName?: string;
@@ -177,6 +179,9 @@ export interface CarpenterData {
   rating: number;
   serviceAreas: string[]; // Added for area-based matching
   serviceArea: string; // Primary service area for geographic restriction
+  
+  // PROFESSION FIELD (NEW - for auto-set feature)
+  profession?: string; // "carpenter" | "plumber" | "electrician" - optional for backward compatibility
   
   // FIELDS FROM Carpenter INTERFACE
   verified?: boolean;
@@ -290,6 +295,7 @@ export const createBookingWithDistribution = async (
       location: bookingData.location,
       pincode: bookingData.pincode,
       serviceArea: serviceArea, // Add service area for geographic filtering
+      serviceType: bookingData.serviceType || "carpenter", // Default to carpenter for backward compatibility
       status: JobStatus.SEARCHING,
       assignedCarpenterId: null,
       createdAt: serverTimestamp(),
@@ -372,7 +378,10 @@ export const acceptJobWithNotification = async (
     activeAcceptRequests.add(`carpenter_${carpenterId}`);
 
     const bookingRef = doc(db, 'bookings', bookingId);
-    const carpenterRef = doc(db, 'carpenters', carpenterId);
+    // Get the correct collection based on worker's profession
+    const workerProfession = await getWorkerProfessionSafe(carpenterId);
+    const collectionName = getProfessionCollection(workerProfession);
+    const workerRef = doc(db, collectionName, carpenterId);
     
     try {
       // DOUBLE-CHECK: Ensure carpenter still doesn't have an active job before entering transaction
@@ -507,12 +516,14 @@ export const acceptJobWithNotification = async (
  * @param serviceAreas - Array of pincodes/localities the carpenter serves
  * @param callback - Function to call with matching bookings
  * @param serviceAreaFilter - Optional service area to filter by (e.g., "airoli")
+ * @param carpenterServices - Array of services the carpenter can provide
  */
 export const startPollingSearchingBookings = (
   carpenterId: string,
   serviceAreas: string[],
   callback: (bookings: BookingData[]) => void,
-  serviceAreaFilter?: string
+  serviceAreaFilter?: string,
+  carpenterServices?: string[]
 ): void => {
   // CRITICAL: GLOBAL SINGLETON CHECK - prevent multiple polling instances
   if (globalPollingActive) {
@@ -542,7 +553,7 @@ export const startPollingSearchingBookings = (
   globalPollingActive = true;
   
   // Initial fetch
-  pollForBookings(serviceAreas, serviceAreaFilter);
+  pollForBookings(serviceAreas, serviceAreaFilter, carpenterServices, carpenterId);
   
   // Set up polling with exponential backoff
   let currentInterval = BASE_POLLING_INTERVAL;
@@ -554,7 +565,7 @@ export const startPollingSearchingBookings = (
     
     pollingTimer = setInterval(() => {
       if (isPollingActive) {
-        pollForBookings(serviceAreas, serviceAreaFilter)
+        pollForBookings(serviceAreas, serviceAreaFilter, carpenterServices, carpenterId)
           .then(() => {
             // Reset error count on successful poll
             pollingErrorCount = 0;
@@ -608,8 +619,9 @@ export const stopPollingSearchingBookings = (): void => {
  * Internal function to poll for searching bookings
  * @param serviceAreas - Array of pincodes to search in
  * @param serviceAreaFilter - Specific service area to filter by (e.g., "airoli")
+ * @param carpenterServices - Array of services the carpenter can provide
  */
-const pollForBookings = async (serviceAreas: string[], serviceAreaFilter?: string): Promise<void> => {
+const pollForBookings = async (serviceAreas: string[], serviceAreaFilter?: string, carpenterServices?: string[], carpenterId?: string): Promise<void> => {
   // Skip polling if we've hit too many errors
   if (pollingErrorCount > MAX_POLLING_ERRORS) {
     console.log('⏭️ Skipping poll due to error threshold exceeded');
@@ -639,17 +651,48 @@ const pollForBookings = async (serviceAreas: string[], serviceAreaFilter?: strin
       });
     });
     
-    console.log(`📊 Polled ${bookings.length} searching bookings`);
+    // Get worker's actual profession for logging
+    const workerProfession = await getWorkerProfessionSafe(carpenterId);
+    
+    console.log(`📊 Polling for bookings in service areas: ${serviceAreas}`);
     if (serviceAreaFilter) {
-      if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
-        console.log(`📍 Filtered by service area: ${serviceAreaFilter}`);
-      }
+      console.log(`📍 Service area filter: ${serviceAreaFilter}`);
     }
+    console.log(`🔧 Worker profession: ${workerProfession}`);
     
     // Notify callback if available - ONLY for searching jobs
     if (pollingCallback) {
       // Filter to ensure we only send searching jobs to prevent updating accepted jobs
-      const searchingJobs = bookings.filter(booking => booking.status === JobStatus.SEARCHING);
+      const filterBookings = async () => {
+        const filteredBookings = [];
+        for (const booking of bookings) {
+          // First check if booking is searching
+          if (booking.status !== JobStatus.SEARCHING) {
+            continue;
+          }
+          
+          // Then check if booking service type matches worker's actual profession
+          const bookingServiceType = booking.serviceType || 'carpenter'; // Default to carpenter for backward compatibility
+          
+          // Get worker's actual profession from Firestore
+          const workerProfession = await getWorkerProfessionSafe(carpenterId);
+          
+          // For filtering, we need to check if booking service matches worker's profession
+          const canHandleService = bookingServiceType === workerProfession;
+          
+          if (!canHandleService) {
+            console.log(`⏭️ Skipping booking because profession mismatch: booking needs ${bookingServiceType}, worker is ${workerProfession}`);
+            continue;
+          }
+          
+          filteredBookings.push(booking);
+        }
+        return filteredBookings;
+      };
+      
+      const searchingJobs = await filterBookings();
+      
+      console.log(`📊 Found ${searchingJobs.length} matching searching bookings (filtered from ${bookings.length} total)`);
       pollingCallback(searchingJobs);
     }
   } catch (error) {
@@ -859,25 +902,28 @@ export const checkAndHandleBookingTimeout = async (bookingData: BookingData): Pr
  * @param bookingId - ID of the booking being released (optional for validation)
  */
 export const releaseCarpenterJob = async (carpenterId: string, bookingId?: string): Promise<void> => {
-  const carpenterRef = doc(db, 'carpenters', carpenterId);
+  // Get the correct collection based on worker's profession
+  const profession = await getWorkerProfessionSafe(carpenterId);
+  const collectionName = getProfessionCollection(profession);
+  const workerRef = doc(db, collectionName, carpenterId);
   
   try {
     await runTransaction(db, async (transaction) => {
-      const carpenterSnapshot = await transaction.get(carpenterRef);
+      const workerSnapshot = await transaction.get(workerRef);
       
-      if (!carpenterSnapshot.exists()) {
-        throw new Error('Carpenter does not exist');
+      if (!workerSnapshot.exists()) {
+        throw new Error('Worker does not exist');
       }
       
-      const carpenterData = carpenterSnapshot.data() as any;
+      const workerData = workerSnapshot.data() as any;
       
       // Validate that this is the correct booking being released (if provided)
-      if (bookingId && carpenterData.activeJobId !== bookingId) {
-        throw new Error('Carpenter does not have this booking assigned');
+      if (bookingId && workerData.activeJobId !== bookingId) {
+        throw new Error('Worker does not have this booking assigned');
       }
       
-      // Update carpenter document
-      transaction.update(carpenterRef, {
+      // Update worker document
+      transaction.update(workerRef, {
         activeJobId: null,
         isAvailable: true,
         updatedAt: serverTimestamp()
@@ -890,11 +936,11 @@ export const releaseCarpenterJob = async (carpenterId: string, bookingId?: strin
     // Update local tracking
     carpenterActiveJobs.delete(carpenterId);
     if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
-      console.log(`✅ Carpenter ${carpenterId} job released`);
+      console.log(`✅ Worker ${carpenterId} job released from ${collectionName} collection`);
     }
     
   } catch (error) {
-    console.error('❌ Error releasing carpenter job:', error);
+    console.error('❌ Error releasing worker job:', error);
     throw error;
   }
 };
@@ -1174,21 +1220,24 @@ export const createOrUpdateCarpenter = async (carpenterData: Omit<CarpenterData,
     // If already created, just update online status and services
     return executeWriteOperation(`update_carpenter_${carpenterData.id}`, async () => {
       try {
-        const carpenterRef = doc(db, 'carpenters', carpenterData.id);
+        // Get the correct collection based on profession
+        const profession = carpenterData.profession || 'carpenter';
+        const collectionName = getProfessionCollection(profession);
+        const workerRef = doc(db, collectionName, carpenterData.id);
         
         // Update only online status and services
-        await updateDoc(carpenterRef, {
+        await updateDoc(workerRef, {
           online: carpenterData.online,
-          services: carpenterData.services,
+          services: carpenterData.services || [profession], // Use profession as service
           serviceAreas: carpenterData.serviceAreas,
           updatedAt: serverTimestamp()
         });
         
         if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
-          console.log(`Carpenter ${carpenterData.id} profile exists, updated online status and services`);
+          console.log(`Worker ${carpenterData.id} profile exists in ${collectionName}, updated online status and services`);
         }
       } catch (error) {
-        console.error('Error updating carpenter profile:', error);
+        console.error('Error updating worker profile:', error);
         throw error;
       }
     });
@@ -1196,15 +1245,19 @@ export const createOrUpdateCarpenter = async (carpenterData: Omit<CarpenterData,
   
   return executeWriteOperation(`create_carpenter_${carpenterData.id}`, async () => {
     try {
-      const carpenterRef = doc(db, 'carpenters', carpenterData.id);
+      // Get the correct collection based on profession
+      const profession = carpenterData.profession || 'carpenter';
+      const collectionName = getProfessionCollection(profession);
+      const workerRef = doc(db, collectionName, carpenterData.id);
       
       // Check if document exists
-      const docSnap = await getDoc(carpenterRef);
+      const docSnap = await getDoc(workerRef);
       
       if (!docSnap.exists()) {
         // Only create the document if it doesn't exist
-        await setDoc(carpenterRef, {
+        await setDoc(workerRef, {
           ...carpenterData,
+          services: carpenterData.services || [profession], // Use profession as service
           createdAt: serverTimestamp(),
           updatedAt: serverTimestamp()
         });
@@ -1213,13 +1266,13 @@ export const createOrUpdateCarpenter = async (carpenterData: Omit<CarpenterData,
         createdCarpenters.add(carpenterData.id);
         
         if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
-          console.log(`Carpenter ${carpenterData.id} profile created`);
+          console.log(`Worker ${carpenterData.id} profile created in ${collectionName} collection`);
         }
       } else {
         // If document exists, just update the online status and services
-        await updateDoc(carpenterRef, {
+        await updateDoc(workerRef, {
           online: carpenterData.online,
-          services: carpenterData.services,
+          services: carpenterData.services || [profession], // Use profession as service
           serviceAreas: carpenterData.serviceAreas,
           updatedAt: serverTimestamp()
         });
@@ -1228,11 +1281,11 @@ export const createOrUpdateCarpenter = async (carpenterData: Omit<CarpenterData,
         createdCarpenters.add(carpenterData.id);
         
         if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
-          console.log(`Carpenter ${carpenterData.id} profile exists, updated online status and services`);
+          console.log(`Worker ${carpenterData.id} profile exists in ${collectionName}, updated online status and services`);
         }
       }
     } catch (error) {
-      console.error('Error creating/updating carpenter profile:', error);
+      console.error('Error creating/updating worker profile:', error);
       throw error;
     }
   });
@@ -1255,9 +1308,13 @@ export const setCarpenterOnlineStatus = async (carpenterId: string, online: bool
   
   return executeWriteOperation(`set_online_${carpenterId}_${online}`, async () => {
     try {
-      const carpenterRef = doc(db, 'carpenters', carpenterId);
+      // Get the correct collection based on worker's profession
+      const profession = await getWorkerProfessionSafe(carpenterId);
+      const collectionName = getProfessionCollection(profession);
+      const workerRef = doc(db, collectionName, carpenterId);
+      
       // UPDATE only - no setDoc, no retries
-      await updateDoc(carpenterRef, {
+      await updateDoc(workerRef, {
         online,
         updatedAt: serverTimestamp()
       });
@@ -1266,10 +1323,10 @@ export const setCarpenterOnlineStatus = async (carpenterId: string, online: bool
       onlineStatusCache.set(carpenterId, online);
       
       if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
-        console.log(`Carpenter ${carpenterId} online status set to: ${online}`);
+        console.log(`Worker ${carpenterId} online status set to: ${online} in ${collectionName} collection`);
       }
     } catch (error) {
-      console.error('Error updating carpenter online status:', error);
+      console.error('Error updating worker online status:', error);
       throw error; // Let UI handle errors
     }
   });
@@ -1455,7 +1512,11 @@ export const subscribeToUserBookings = (
 export const updateCarpenterProfile = async (carpenterId: string, updatedFields: Partial<CarpenterData>): Promise<void> => {
   return executeWriteOperation(`update_carpenter_profile_${carpenterId}`, async () => {
     try {
-      const carpenterRef = doc(db, 'carpenters', carpenterId);
+      // Get the correct collection based on worker's profession
+      const profession = await getWorkerProfessionSafe(carpenterId);
+      const collectionName = getProfessionCollection(profession);
+      const workerRef = doc(db, collectionName, carpenterId);
+      
       // Prepare update data without id and remove undefined values
       const updateData: any = {};
       
@@ -1469,14 +1530,14 @@ export const updateCarpenterProfile = async (carpenterId: string, updatedFields:
       
       updateData.updatedAt = serverTimestamp();
       
-      await updateDoc(carpenterRef, updateData);
+      await updateDoc(workerRef, updateData);
       
       if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
-        console.log(`Carpenter ${carpenterId} profile updated with fields:`, Object.keys(updateData));
+        console.log(`Worker ${carpenterId} profile updated in ${collectionName} collection with fields:`, Object.keys(updateData));
       }
     } catch (error) {
       if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
-        console.error('Error updating carpenter profile:', error);
+        console.error('Error updating worker profile:', error);
       }
       throw error;
     }

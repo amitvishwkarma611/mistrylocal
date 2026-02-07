@@ -10,8 +10,9 @@ import CarpenterProfileEdit from './views/CarpenterProfileEdit';
 import CustomerProfileEdit from './views/CustomerProfileEdit';
 import { MOCK_CARPENTERS } from './constants';
 import { translations, Language } from './translations';
-import { Home, User, Bell, Briefcase, RefreshCcw, Hammer, ShieldCheck, Star } from 'lucide-react';
+import { Home, User, Bell, Briefcase, RefreshCcw, Hammer, ShieldCheck, Star, Wrench, Zap } from 'lucide-react';
 import { subscribeToUserBookings, updateBookingStatus as updateBookingStatusFirestore, cancelBooking, releaseCarpenterJob, startBookingJob } from './services/bookingService';
+import { applyMinimumPrice } from './services/priceService';
 
 // Extend Window interface to include our custom properties
 declare global {
@@ -31,6 +32,10 @@ const App: React.FC = () => {
   const [user, setUser] = useState<{ role: AppRole; name: string; phone: string; uid: string } | null>(null);
   const [showAuth, setShowAuth] = useState<boolean>(false);
   const [authRole, setAuthRole] = useState<AppRole | null>(null);
+  const [selectedProfession, setSelectedProfession] = useState<string | null>(null); // Track selected profession
+  
+  // Safe auth-based visibility flag
+  const isLoggedIn = !!user;
   
   const [activeTab, setActiveTab] = useState('home');
   const [language, setLanguage] = useState<Language>((localStorage.getItem('mistry_lang') as Language) || 'EN');
@@ -201,6 +206,12 @@ const App: React.FC = () => {
                 }
               }
               
+              // Calculate price based on service type
+              const serviceType = b.serviceType || 'carpenter';
+              // For now, we'll use a default price since we don't have the actual service details stored
+              // In a real scenario, you might want to store the calculated price in the booking
+              const calculatedPrice = applyMinimumPrice(serviceType, 400); // Default base price
+              
               return {
                 id: b.id || '',
                 service: b.description,
@@ -210,7 +221,7 @@ const App: React.FC = () => {
                 address: 'Customer location',
                 lat: b.location.lat,
                 lng: b.location.lng,
-                price: '₹400',
+                price: `₹${calculatedPrice}`,
                 isUpcoming: true,
                 isRated: b.ratingSubmitted || false,
                 customerName: b.customerName,
@@ -575,7 +586,29 @@ const App: React.FC = () => {
     }
   };
 
-  const handleLogin = (role: AppRole, identifier: string, name: string, uid: string) => {
+  const handleLogin = async (role: AppRole, identifier: string, name: string, uid: string) => {
+    // Auto-set profession for workers on first login
+    if (role === AppRole.CARPENTER && uid) {
+      try {
+        // Import profession service dynamically to avoid circular dependencies
+        const { autoSetWorkerProfession } = await import('./services/professionService');
+        
+        // Get stored profession from localStorage as fallback
+        const storedProfession = localStorage.getItem('selectedProfession');
+        
+        // Auto-set the profession (will only write if needed)
+        await autoSetWorkerProfession(uid, role, selectedProfession || undefined, storedProfession || undefined);
+        
+        // Store the selected profession for future reference
+        if (selectedProfession) {
+          localStorage.setItem('selectedProfession', selectedProfession);
+        }
+      } catch (error) {
+        console.error('Error auto-setting worker profession:', error);
+        // Continue with login even if profession setting fails
+      }
+    }
+    
     setUser({
       role,
       phone: identifier.includes('@') ? '' : identifier, // If identifier is email, set phone as empty
@@ -584,6 +617,7 @@ const App: React.FC = () => {
     });
     setShowAuth(false);
     setAuthRole(null); // Reset auth role for next login
+    setSelectedProfession(null); // Clear profession selection
   };
 
   // Removed GPS tracking effect - no longer needed with area-based matching
@@ -694,7 +728,7 @@ const App: React.FC = () => {
     <div className="mobile-container flex flex-col min-h-screen border-x border-gray-100 relative overflow-hidden">
       {showAuth ? (
         authRole === null ? (
-          // Enhanced role selection screen
+          // Enhanced role selection screen with profession selection
           <div className="p-8 min-h-screen flex flex-col items-center justify-center bg-gradient-to-br from-orange-50 via-white to-amber-50 relative overflow-hidden">
             {/* Floating decorative elements */}
             <div className="absolute top-20 left-10 w-4 h-4 bg-orange-200 rounded-full float-animation opacity-60"></div>
@@ -708,9 +742,13 @@ const App: React.FC = () => {
               <p className="text-gray-500 font-bold text-lg max-w-md mx-auto">Connect skilled professionals with customers</p>
             </div>
             
+            {/* Customer Option */}
             <div className="w-full max-w-md space-y-5 animate-in fade-in-up slide-in-from-bottom-4 duration-700 delay-200 relative z-10">
               <button 
-                onClick={() => setAuthRole(AppRole.CUSTOMER)}
+                onClick={() => {
+                  setSelectedProfession(null); // Clear profession selection
+                  setAuthRole(AppRole.CUSTOMER);
+                }}
                 className="w-full p-7 bg-gradient-to-br from-white to-orange-50 border-2 border-orange-200 rounded-3xl shadow-lg hover:shadow-2xl transition-all active:scale-95 flex flex-col items-center gap-4 group card-hover"
               >
                 <div className="w-20 h-20 bg-gradient-to-br from-orange-100 to-orange-200 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform duration-300 hover-glow">
@@ -718,28 +756,85 @@ const App: React.FC = () => {
                 </div>
                 <div className="text-center">
                   <h3 className="text-2xl font-black text-amber-900 mb-2 group-hover:text-orange-600 transition-colors">I'm a Customer</h3>
-                  <p className="text-base text-gray-600 font-medium max-w-[280px]">Find skilled carpenters for your home projects</p>
+                  <p className="text-base text-gray-600 font-medium max-w-[280px]">Find skilled professionals for your home projects</p>
                 </div>
                 <div className="mt-2 px-4 py-2 bg-gradient-to-r from-orange-100 to-orange-200 text-orange-700 rounded-full text-xs font-bold shadow-sm">
                   Book Services
                 </div>
               </button>
               
-              <button 
-                onClick={() => setAuthRole(AppRole.CARPENTER)}
-                className="w-full p-7 bg-gradient-to-br from-white to-amber-50 border-2 border-amber-200 rounded-3xl shadow-lg hover:shadow-2xl transition-all active:scale-95 flex flex-col items-center gap-4 group card-hover"
-              >
-                <div className="w-20 h-20 bg-gradient-to-br from-amber-100 to-amber-200 rounded-2xl flex items-center justify-center group-hover:scale-110 transition-transform duration-300 hover-glow">
-                  <Hammer className="text-amber-900" size={36} />
+              {/* Worker Profession Selection */}
+              <div className="bg-white border-2 border-amber-200 rounded-3xl p-6 shadow-lg">
+                <h3 className="text-xl font-black text-amber-900 mb-4 text-center">I'm a Professional</h3>
+                <p className="text-gray-600 font-medium text-center mb-6 text-sm">Select your profession to get hired</p>
+                
+                <div className="grid grid-cols-3 gap-3">
+                  <button
+                    onClick={() => {
+                      setSelectedProfession('carpenter');
+                      setAuthRole(AppRole.CARPENTER);
+                    }}
+                    className={`p-4 rounded-2xl flex flex-col items-center gap-2 transition-all border-2 ${
+                      selectedProfession === 'carpenter' 
+                        ? 'bg-amber-100 border-amber-500 shadow-md scale-105' 
+                        : 'bg-gray-50 border-gray-200 hover:border-amber-300 hover:bg-amber-50'
+                    }`}
+                  >
+                    <Hammer className={`${
+                      selectedProfession === 'carpenter' ? 'text-amber-700' : 'text-amber-600'
+                    }`} size={24} />
+                    <span className={`text-xs font-black uppercase tracking-wider ${
+                      selectedProfession === 'carpenter' ? 'text-amber-900' : 'text-gray-700'
+                    }`}>Carpenter</span>
+                  </button>
+                  
+                  <button
+                    onClick={() => {
+                      setSelectedProfession('plumber');
+                      setAuthRole(AppRole.CARPENTER);
+                    }}
+                    className={`p-4 rounded-2xl flex flex-col items-center gap-2 transition-all border-2 ${
+                      selectedProfession === 'plumber' 
+                        ? 'bg-blue-100 border-blue-500 shadow-md scale-105' 
+                        : 'bg-gray-50 border-gray-200 hover:border-blue-300 hover:bg-blue-50'
+                    }`}
+                  >
+                    <Wrench className={`${
+                      selectedProfession === 'plumber' ? 'text-blue-700' : 'text-blue-600'
+                    }`} size={24} />
+                    <span className={`text-xs font-black uppercase tracking-wider ${
+                      selectedProfession === 'plumber' ? 'text-blue-900' : 'text-gray-700'
+                    }`}>Plumber</span>
+                  </button>
+                  
+                  <button
+                    onClick={() => {
+                      setSelectedProfession('electrician');
+                      setAuthRole(AppRole.CARPENTER);
+                    }}
+                    className={`p-4 rounded-2xl flex flex-col items-center gap-2 transition-all border-2 ${
+                      selectedProfession === 'electrician' 
+                        ? 'bg-purple-100 border-purple-500 shadow-md scale-105' 
+                        : 'bg-gray-50 border-gray-200 hover:border-purple-300 hover:bg-purple-50'
+                    }`}
+                  >
+                    <Zap className={`${
+                      selectedProfession === 'electrician' ? 'text-purple-700' : 'text-purple-600'
+                    }`} size={24} />
+                    <span className={`text-xs font-black uppercase tracking-wider ${
+                      selectedProfession === 'electrician' ? 'text-purple-900' : 'text-gray-700'
+                    }`}>Electrician</span>
+                  </button>
                 </div>
-                <div className="text-center">
-                  <h3 className="text-2xl font-black text-amber-900 mb-2 group-hover:text-amber-700 transition-colors">I'm a Mistry</h3>
-                  <p className="text-base text-gray-600 font-medium max-w-[280px]">Get hired for carpentry jobs in your area</p>
-                </div>
-                <div className="mt-2 px-4 py-2 bg-gradient-to-r from-amber-100 to-amber-200 text-amber-800 rounded-full text-xs font-bold shadow-sm">
-                  Offer Services
-                </div>
-              </button>
+                
+                {selectedProfession && (
+                  <div className="mt-4 p-3 bg-amber-50 rounded-xl border border-amber-200">
+                    <p className="text-amber-800 text-sm font-bold text-center">
+                      Selected: {selectedProfession.charAt(0).toUpperCase() + selectedProfession.slice(1)}
+                    </p>
+                  </div>
+                )}
+              </div>
             </div>
             
             <div className="mt-12 text-center animate-in fade-in-up duration-700 delay-500 relative z-10">
@@ -884,29 +979,31 @@ const App: React.FC = () => {
         </>
       )}
 
-      <nav className="fixed bottom-0 left-0 right-0 max-w-[480px] mx-auto bg-white/95 backdrop-blur-md border-t border-gray-100 px-6 py-3 flex justify-between items-center z-20 shadow-[0_-6px_20px_rgba(0,0,0,0.05)] rounded-t-2xl">
-        <button onClick={() => setActiveTab('home')} className={`flex flex-col items-center gap-1 transition-all duration-200 hover:scale-105 ${activeTab === 'home' ? 'text-orange-600 scale-110' : 'text-gray-400'}`}>
-          <Home size={22} className={`${activeTab === 'home' ? 'drop-shadow-[0_0_8px_rgba(249,115,22,0.4)]' : ''}`} />
-          <span className="text-[10px] font-medium">{t('home')}</span>
-        </button>
-        <button onClick={() => setActiveTab('jobs')} className={`flex flex-col items-center gap-1 transition-all duration-200 hover:scale-105 ${activeTab === 'jobs' ? 'text-orange-600 scale-110' : 'text-gray-400'}`}>
-          <Briefcase size={22} className={`${activeTab === 'jobs' ? 'drop-shadow-[0_0_8px_rgba(249,115,22,0.4)]' : ''}`} />
-          <span className="text-[10px] font-medium">{user && user.role === AppRole.CUSTOMER ? t('bookings') : 'My Jobs'}</span>
-        </button>
-        <button onClick={() => setActiveTab('alerts')} className={`flex flex-col items-center gap-1 transition-all duration-200 hover:scale-105 ${activeTab === 'alerts' ? 'text-orange-600 scale-110' : 'text-gray-400'}`}>
-          <div className="relative">
-            <Bell size={22} className={`${activeTab === 'alerts' ? 'drop-shadow-[0_0_8px_rgba(249,115,22,0.4)]' : ''}`} />
-            {user && user.role === AppRole.CARPENTER && bookings.some(b => b.status === JobStatus.SEARCHING) && (
-              <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-orange-600 rounded-full border-2 border-white animate-pulse"></div>
-            )}
-          </div>
-          <span className="text-[10px] font-medium">{t('alerts')}</span>
-        </button>
-        <button onClick={() => setActiveTab('profile')} className={`flex flex-col items-center gap-1 transition-all duration-200 hover:scale-105 ${activeTab === 'profile' ? 'text-orange-600 scale-110' : 'text-gray-400'}`}>
-          <User size={22} className={`${activeTab === 'profile' ? 'drop-shadow-[0_0_8px_rgba(249,115,22,0.4)]' : ''}`} />
-          <span className="text-[10px] font-medium">{t('profile')}</span>
-        </button>
-      </nav>
+      {isLoggedIn && (
+        <nav className="fixed bottom-0 left-0 right-0 max-w-[480px] mx-auto bg-white/95 backdrop-blur-md border-t border-gray-100 px-6 py-3 flex justify-between items-center z-20 shadow-[0_-6px_20px_rgba(0,0,0,0.05)] rounded-t-2xl">
+          <button onClick={() => setActiveTab('home')} className={`flex flex-col items-center gap-1 transition-all duration-200 hover:scale-105 ${activeTab === 'home' ? 'text-orange-600 scale-110' : 'text-gray-400'}`}>
+            <Home size={22} className={`${activeTab === 'home' ? 'drop-shadow-[0_0_8px_rgba(249,115,22,0.4)]' : ''}`} />
+            <span className="text-[10px] font-medium">{t('home')}</span>
+          </button>
+          <button onClick={() => setActiveTab('jobs')} className={`flex flex-col items-center gap-1 transition-all duration-200 hover:scale-105 ${activeTab === 'jobs' ? 'text-orange-600 scale-110' : 'text-gray-400'}`}>
+            <Briefcase size={22} className={`${activeTab === 'jobs' ? 'drop-shadow-[0_0_8px_rgba(249,115,22,0.4)]' : ''}`} />
+            <span className="text-[10px] font-medium">{user && user.role === AppRole.CUSTOMER ? t('bookings') : 'My Jobs'}</span>
+          </button>
+          <button onClick={() => setActiveTab('alerts')} className={`flex flex-col items-center gap-1 transition-all duration-200 hover:scale-105 ${activeTab === 'alerts' ? 'text-orange-600 scale-110' : 'text-gray-400'}`}>
+            <div className="relative">
+              <Bell size={22} className={`${activeTab === 'alerts' ? 'drop-shadow-[0_0_8px_rgba(249,115,22,0.4)]' : ''}`} />
+              {user && user.role === AppRole.CARPENTER && bookings.some(b => b.status === JobStatus.SEARCHING) && (
+                <div className="absolute -top-1 -right-1 w-2.5 h-2.5 bg-orange-600 rounded-full border-2 border-white animate-pulse"></div>
+              )}
+            </div>
+            <span className="text-[10px] font-medium">{t('alerts')}</span>
+          </button>
+          <button onClick={() => setActiveTab('profile')} className={`flex flex-col items-center gap-1 transition-all duration-200 hover:scale-105 ${activeTab === 'profile' ? 'text-orange-600 scale-110' : 'text-gray-400'}`}>
+            <User size={22} className={`${activeTab === 'profile' ? 'drop-shadow-[0_0_8px_rgba(249,115,22,0.4)]' : ''}`} />
+            <span className="text-[10px] font-medium">{t('profile')}</span>
+          </button>
+        </nav>
+      )}
     </div>
   );
 };

@@ -62,6 +62,9 @@ export interface Carpenter {
   serviceAreas?: string[]; // Added for area-based matching
   serviceArea?: string; // Primary service area for geographic restriction
   
+  // PROFESSION FIELD (NEW - for auto-set feature)
+  profession?: string; // "carpenter" | "plumber" | "electrician" - optional for backward compatibility
+  
   // NEW PROFESSIONAL DETAILS (optional)
   alternateMobileNumber?: string;
   address?: Address;

@@ -208,6 +208,10 @@ button:not(.no-transition):active {
   animation-name: fadeIn;
 }
 
+.animate-fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
 .fade-in-up {
   animation-name: fadeInUp;
 }

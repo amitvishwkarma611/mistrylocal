@@ -9,9 +9,10 @@ import CustomerAuth from './views/CustomerAuth';
 import CarpenterAuth from './views/CarpenterAuth';
 import CarpenterProfileEdit from './views/CarpenterProfileEdit';
 import CustomerProfileEdit from './views/CustomerProfileEdit';
+import AdminPanel from './views/AdminPanel';
 import { MOCK_CARPENTERS } from './constants';
 import { translations, Language } from './translations';
-import { Home, User, Bell, Briefcase, RefreshCcw, Hammer, ShieldCheck, Star, Wrench, Zap } from 'lucide-react';
+import { Home, User, Bell, Briefcase, RefreshCcw, Hammer, ShieldCheck, Star, Wrench, Zap, Shield } from 'lucide-react';
 import { subscribeToUserBookings, updateBookingStatus as updateBookingStatusFirestore, cancelBooking, releaseCarpenterJob, startBookingJob } from './services/bookingService';
 import { applyMinimumPrice } from './services/priceService';
 import { auth } from './firebase'; // Import auth
@@ -36,11 +37,18 @@ const App: React.FC = () => {
   const [showAuth, setShowAuth] = useState<boolean>(true); // Start with auth screen
   const [authRole, setAuthRole] = useState<AppRole | null>(null);
   const [selectedProfession, setSelectedProfession] = useState<string | null>(null); // Track selected profession
+  const [showAdminPanel, setShowAdminPanel] = useState<boolean>(false); // Show full admin panel
   
   // Safe auth-based visibility flag
   const isLoggedIn = !!user;
   
   const [activeTab, setActiveTab] = useState('home');
+  const [isAdminMode, setIsAdminMode] = useState(false); // Admin panel toggle
+  
+  // Debug logging for admin mode
+  useEffect(() => {
+    console.log('isAdminMode changed to:', isAdminMode);
+  }, [isAdminMode]);
   const [language, setLanguage] = useState<Language>((localStorage.getItem('mistry_lang') as Language) || 'EN');
   const [bookings, setBookings] = useState<Booking[]>(INITIAL_BOOKINGS);
   const [carpenters, setCarpenters] = useState<Carpenter[]>([]);
@@ -52,6 +60,34 @@ const App: React.FC = () => {
   
   // In-memory set to track processed booking IDs
   const processedBookingIds = new Set<string>();
+
+  // Check URL for admin panel parameter
+  useEffect(() => {
+    const urlParams = new URLSearchParams(window.location.search);
+    if (urlParams.get('admin') === 'true') {
+      setShowAdminPanel(true);
+    }
+  }, []);
+
+  // Admin mode toggle (press Ctrl+A to open admin page)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Open admin page with Ctrl+A
+      if (e.key === 'a' && e.ctrlKey && !e.shiftKey && !e.altKey) {
+        console.log('Opening admin page with Ctrl+A!');
+        // Open in new window with full web dimensions
+        const adminUrl = window.location.origin + window.location.pathname + '?admin=true';
+        const adminWindow = window.open(adminUrl, '_blank', 'width=1200,height=800,resizable=yes,scrollbars=yes');
+        if (adminWindow) {
+          adminWindow.focus();
+        }
+        e.preventDefault();
+      }
+    };
+    
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   // Authentication state listener
   useEffect(() => {
@@ -802,6 +838,25 @@ const App: React.FC = () => {
     };
   }, [bookings]); // Only re-run when bookings change
 
+  if (showAdminPanel) {
+    return (
+      <div className="w-screen h-screen bg-gray-50">
+        <AdminPanel 
+          t={{ 
+            admin_dashboard: 'Admin Dashboard', 
+            all_customers: 'All Customers', 
+            total_workers: 'Total Workers', 
+            no_data: 'No data',
+            carpenters: 'Carpenters',
+            plumbers: 'Plumbers',
+            electricians: 'Electricians'
+          }} 
+          fetchRealData={true}
+        />
+      </div>
+    );
+  }
+
   return (
     <WalletProvider userId={user?.uid}>
     <div className="mobile-container flex flex-col min-h-screen border-x border-gray-100 relative overflow-hidden">
@@ -970,7 +1025,9 @@ const App: React.FC = () => {
                   <p className="text-gray-400 font-medium italic">Loading your profile...</p>
                 </div>
               ) : user.role === AppRole.CUSTOMER ? (
-                activeTab === 'home' ? <CustomerHome onBook={addBooking} onCancel={cancelBookingRequest} onUpdateStatus={updateBookingStatus} carpenters={carpenters} bookings={bookings} t={t} user={user} /> :
+                isAdminMode ? (
+                  <AdminPanel t={t} />
+                ) : activeTab === 'home' ? <CustomerHome onBook={addBooking} onCancel={cancelBookingRequest} onUpdateStatus={updateBookingStatus} carpenters={carpenters} bookings={bookings} t={t} user={user} /> :
                 activeTab === 'jobs' ? <MyBookings bookings={bookings} onUpdateStatus={updateBookingStatus} onRateBooking={handleRateBooking} t={t} user={user} /> :
                 activeTab === 'profile' ? (
                   <div className="p-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
@@ -1006,7 +1063,9 @@ const App: React.FC = () => {
                   </div>
                 )
               ) : (
-                activeTab === 'home' ? <CarpenterPortal bookings={bookings} onUpdateStatus={updateBookingStatus} t={t} user={user} /> :
+                isAdminMode ? (
+                  <AdminPanel t={t} />
+                ) : activeTab === 'home' ? <CarpenterPortal bookings={bookings} onUpdateStatus={updateBookingStatus} t={t} user={user} /> :
                 activeTab === 'jobs' ? (
                   <MyBookings bookings={bookings} onUpdateStatus={updateBookingStatus} t={t} user={user} />
                 ) : activeTab === 'alerts' ? (
@@ -1059,6 +1118,12 @@ const App: React.FC = () => {
         </>
       )}
 
+      {isLoggedIn && isAdminMode && (
+        <div className="fixed top-4 left-1/2 transform -translate-x-1/2 z-50 bg-red-600 text-white px-4 py-2 rounded-full text-sm font-bold shadow-lg animate-pulse">
+          ADMIN MODE ACTIVE - Press Ctrl+Shift+A to exit
+        </div>
+      )}
+      
       {isLoggedIn && (
         <nav className="fixed bottom-0 left-0 right-0 max-w-[480px] mx-auto bg-white/95 backdrop-blur-md border-t border-gray-100 px-6 py-3 flex justify-between items-center z-20 shadow-[0_-6px_20px_rgba(0,0,0,0.05)] rounded-t-2xl">
           <button onClick={() => setActiveTab('home')} className={`flex flex-col items-center gap-1 transition-all duration-200 hover:scale-105 ${activeTab === 'home' ? 'text-orange-600 scale-110' : 'text-gray-400'}`}>

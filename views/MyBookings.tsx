@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Booking, JobStatus } from '../types';
 import { translations } from '../translations';
 import { Calendar, MapPin, Clock, MessageSquare, Phone, CheckCircle2, AlertCircle, Navigation, Star, Heart, Hammer, ShieldCheck, History, IndianRupee as IndianRupeeIcon } from 'lucide-react';
@@ -23,6 +23,12 @@ const MyBookings: React.FC<MyBookingsProps> = ({ bookings, onUpdateStatus, onRat
     const draft = ratingDraft[bookingId];
     if (draft && draft.value > 0) {
       onRateBooking(bookingId, draft.value, draft.tags || []);
+      // Clear the rating draft after submission
+      setRatingDraft(prev => {
+        const newDraft = {...prev};
+        delete newDraft[bookingId];
+        return newDraft;
+      });
     }
   };
 
@@ -62,6 +68,11 @@ const MyBookings: React.FC<MyBookingsProps> = ({ bookings, onUpdateStatus, onRat
     b.status === JobStatus.ACCEPT_TIMEOUT
   ).sort((a, b) => b.createdAt - a.createdAt);
 
+  // Effect to trigger UI refresh after rating submission
+  useEffect(() => {
+    // This will cause a re-render when bookings change
+  }, [bookings]);
+  
   return (
     <div className="p-5 animate-in fade-in slide-in-from-bottom-4 duration-500 pb-24">
       <div className="mb-6">

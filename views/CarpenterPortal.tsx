@@ -7,6 +7,7 @@ import { setCarpenterOnlineStatus, startPollingSearchingBookings, stopPollingSea
 import { doc, getDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { getWalletBalance, getWalletInfo } from '../services/walletService';
+import { useWallet } from '../contexts/WalletContext';
 
 interface CarpenterPortalProps {
   bookings: Booking[];
@@ -26,7 +27,7 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
   const [isWorking, setIsWorking] = useState(false); // Track work start state
   const [isFinishing, setIsFinishing] = useState(false); // Track job finish state
   const [carpenterProfile, setCarpenterProfile] = useState<Carpenter | null>(null);
-  const [walletBalance, setWalletBalance] = useState<number>(0);
+  const { walletBalance, refreshWalletBalance } = useWallet();
   const [showWelcomeMessage, setShowWelcomeMessage] = useState<boolean>(false); // Wallet balance state
   
   // Initialize carpenter profile only once when component mounts (UBER-STYLE)
@@ -117,31 +118,94 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
     fetchCarpenterProfile();
   }, [user]);
   
-  // Fetch wallet balance when component mounts
+  // Refresh carpenter profile when bookings change (for live updates to jobs/ratings)
   useEffect(() => {
-    const fetchWalletBalance = async () => {
+    const refreshCarpenterProfile = async () => {
       if (user && user.uid) {
         try {
-          const balance = await getWalletBalance(user.uid);
-          setWalletBalance(balance);
-          
-          // Show welcome message if balance is exactly 200 (welcome credit)
-          if (balance === 200) {
-            const walletInfo = await getWalletInfo(user.uid);
+          const carpenterDoc = await getDoc(doc(db, 'carpenters', user.uid));
+          if (carpenterDoc.exists()) {
+            const data = carpenterDoc.data();
+            // Update the local state with fresh data
+            setCarpenterProfile(prev => {
+              if (!prev) return prev; // Changed from return null to return prev
+              return {
+                ...prev,
+                rating: data.rating || 0,
+                ratingCount: data.ratingCount || 0,
+                jobsCompleted: data.jobsCompleted || 0,
+                trustScore: data.trustScore || 0,
+                updatedAt: data.updatedAt,
+              };
+            });
+          }
+        } catch (error) {
+          console.error('Error refreshing carpenter profile:', error);
+        }
+      }
+    };
+    
+    // Only refresh when completed jobs change
+    const completedBookingsCount = bookings.filter(b => b.status === JobStatus.COMPLETED && b.mistryId === user?.uid).length;
+    refreshCarpenterProfile();
+  }, [bookings, user?.uid]);
+  
+  // Show welcome message when wallet balance is exactly 200 (welcome credit)
+  useEffect(() => {
+    if (walletBalance === 200) {
+      const showWelcome = async () => {
+        if (user && user.uid) {
+          try {
+            const { getWorkerProfessionSafe } = await import('../services/professionService');
+            const { getWalletInfo } = await import('../services/walletService');
+            const profession = await getWorkerProfessionSafe(user.uid);
+            const walletInfo = await getWalletInfo(user.uid, profession);
             if (walletInfo?.welcomeCreditGiven) {
               setShowWelcomeMessage(true);
               // Auto-hide after 5 seconds
               setTimeout(() => setShowWelcomeMessage(false), 5000);
             }
+          } catch (error) {
+            console.error('Error checking wallet info for welcome message:', error);
           }
-        } catch (error) {
-          console.error('Error fetching wallet balance:', error);
         }
+      };
+      
+      showWelcome();
+    }
+  }, [walletBalance, user]);
+  
+  // Update serviceAreas when carpenterProfile changes
+  useEffect(() => {
+    if (carpenterProfile?.serviceAreas && carpenterProfile.serviceAreas.length > 0) {
+      setServiceAreas(carpenterProfile.serviceAreas);
+      console.log('📍 Service areas updated from profile:', carpenterProfile.serviceAreas);
+    } else {
+      // Default to Airoli service areas if none are set
+      const defaultServiceAreas = ['400707', '400708'];
+      setServiceAreas(defaultServiceAreas);
+      console.log('📍 Using default Airoli service areas');
+      
+      // Update the profile with default service areas if they're missing
+      if (user?.uid && (!carpenterProfile?.serviceAreas || carpenterProfile.serviceAreas.length === 0)) {
+        // Import the update function and update the profile
+        import('../services/bookingService').then(({ updateCarpenterProfile }) => {
+          updateCarpenterProfile(user.uid, { 
+            serviceAreas: defaultServiceAreas,
+            serviceArea: 'airoli' // Set default service area
+          })
+            .then(() => {
+              console.log('✅ Updated profile with default service areas and service area');
+            })
+            .catch((error) => {
+              console.error('❌ Failed to update profile with default service areas:', error);
+            });
+        }).catch((error) => {
+          console.error('❌ Failed to import bookingService:', error);
+        });
       }
-    };
-    
-    fetchWalletBalance();
-  }, [user]);
+    }
+  }, [carpenterProfile, user?.uid]);
   
   // Update online status separately when needed (lightweight)
   useEffect(() => {
@@ -161,7 +225,7 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
   
   // State for nearby jobs
   const [nearbyJobs, setNearbyJobs] = useState<Booking[]>([]);
-  const [serviceAreas, setServiceAreas] = useState<string[]>(['400707', '400708']); // Airoli service areas
+  const [serviceAreas, setServiceAreas] = useState<string[]>([]);
   
   // Refs to track component state
   const isMountedRef = useRef(true);
@@ -190,6 +254,13 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
     
     // START POLLING - runs every 10-15 seconds
     const carpenterServices = carpenterProfile?.services || ['carpenter']; // Default to carpenter for backward compatibility
+    console.log('🚀 Starting polling with:', {
+      carpenterId: user.uid,
+      serviceAreas: serviceAreas,
+      serviceAreaFilter: 'airoli',
+      carpenterServices: carpenterServices
+    });
+    
     startPollingSearchingBookings(
       user.uid,
       serviceAreas,
@@ -199,6 +270,16 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
         if (bookings.length !== prevJobCount) {
           console.log(`📊 Received ${bookings.length} searching bookings from polling (was ${prevJobCount})`);
         }
+        
+        // Log detailed booking information
+        console.log('📋 Received bookings details:', bookings.map(b => ({
+          id: b.id,
+          serviceType: b.serviceType,
+          status: b.status,
+          pincode: b.pincode,
+          serviceArea: b.serviceArea,
+          description: b.description
+        })));
         
         // Convert BookingData to Booking interface - ONLY for searching jobs
         const convertedJobs = bookings
@@ -426,9 +507,27 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
                       if (success) {
                         // Update parent component
                         onUpdateStatus(activeOffer.id, JobStatus.ACCEPTED, user.uid);
+                        
+                        // Refresh wallet balance to reflect the deducted lead charge
+                        // Adding a slight delay to ensure the backend transaction completes
+                        setTimeout(async () => {
+                          try {
+                            await refreshWalletBalance(true); // Force refresh to bypass rate limiting
+                          } catch (error) {
+                            console.error('Error refreshing wallet balance after job acceptance:', error);
+                          }
+                        }, 500); // Slightly longer delay to ensure transaction completion
                       } else {
-                        // Job was already taken by another carpenter
-                        alert('Sorry, this job has been taken by another carpenter.');
+                        // Job was already taken by another carpenter or low balance
+                        
+                        // Refresh wallet balance to show current state in case of low balance
+                        setTimeout(async () => {
+                          try {
+                            await refreshWalletBalance(true); // Force refresh to bypass rate limiting
+                          } catch (error) {
+                            console.error('Error refreshing wallet balance after failed job acceptance:', error);
+                          }
+                        }, 500); // Slightly longer delay to ensure any backend operations complete
                       }
                     } finally {
                       setIsAccepting(false);

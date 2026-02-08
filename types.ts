@@ -75,7 +75,6 @@ export interface Carpenter {
   
   // EARNINGS DATA (may not exist in current documents)
   weeklyEarnings?: number;
-  walletBalance?: number;
 }
 
 export interface Customer {

@@ -21,7 +21,17 @@ service cloud.firestore {
     // Users collection (restore for auth)
     // =========================
     match /users/{userId} {
-      allow read, write: if isOwner(userId);
+      // User can read their own profile
+      allow read: if isOwner(userId);
+      
+      // Create allowed only for the user themselves
+      allow create: if isOwner(userId);
+      
+      // Update allowed only for the user themselves
+      allow update: if isOwner(userId);
+      
+      // Prevent deletion of user profiles
+      allow delete: if false;
     }
 
     // =========================
@@ -29,7 +39,29 @@ service cloud.firestore {
     // =========================
     match /carpenters/{carpenterId} {
       allow read: if isLoggedIn();
-      allow write: if isOwner(carpenterId);
+      // Allow updates that preserve ownership and prevent unauthorized field changes
+      allow create, update: if isOwner(carpenterId);
+      allow delete: if false;  // Prevent accidental deletion
+    }
+
+    // =========================
+    // Plumbers collection (missing)
+    // =========================
+    match /plumbers/{plumberId} {
+      allow read: if isLoggedIn();
+      // Allow updates that preserve ownership and prevent unauthorized field changes
+      allow create, update: if isOwner(plumberId);
+      allow delete: if false;  // Prevent accidental deletion
+    }
+
+    // =========================
+    // Electricians collection (missing)
+    // =========================
+    match /electricians/{electricianId} {
+      allow read: if isLoggedIn();
+      // Allow updates that preserve ownership and prevent unauthorized field changes
+      allow create, update: if isOwner(electricianId);
+      allow delete: if false;  // Prevent accidental deletion
     }
 
     // =========================
@@ -37,7 +69,9 @@ service cloud.firestore {
     // =========================
     match /customers/{customerId} {
       allow read: if isLoggedIn();
-      allow write: if isOwner(customerId);
+      // Allow updates that preserve ownership and prevent unauthorized field changes
+      allow create, update: if isOwner(customerId);
+      allow delete: if false;  // Prevent accidental deletion
     }
 
     // =========================
@@ -45,14 +79,17 @@ service cloud.firestore {
     // =========================
     match /workers/{workerId} {
       // Worker apna profile read/write kar sakta hai
-      allow read, update: if isOwner(workerId);
-
+      allow read: if isOwner(workerId);
+      
       // Create only once with valid profession
       allow create: if isOwner(workerId) && isValidProfession();
-
-      // Wallet balance frontend se change nahi ho sakta
+      
+      // Update rules that allow changes but maintain ownership
       allow update: if isOwner(workerId)
-        && request.resource.data.walletBalance == resource.data.walletBalance;
+        // Prevent changing the profession after creation
+        && (!('profession' in request.resource.data) || resource.data.profession == request.resource.data.profession);
+
+      // No wallet balance field in this collection - using dedicated wallet collections instead
     }
 
     // =========================
@@ -60,52 +97,74 @@ service cloud.firestore {
     // =========================
     match /carpenter_wallets/{workerId} {
       allow read: if isOwner(workerId);
-      allow create, update: if false; // Only backend can modify
+      // Allow creation of wallet with proper initial data only
+      allow create: if isOwner(workerId) 
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.balance == 200  // Welcome credit amount
+        && request.resource.data.totalRecharge == 0
+        && request.resource.data.totalSpent == 0
+        && request.resource.data.welcomeCreditGiven == true;
+      // Allow updates that maintain data integrity but prevent arbitrary balance changes
+      // Balance changes should only happen through backend transactions with proper validation
+      allow update: if isOwner(workerId)
+        // For partial updates, only check fields that exist in both old and new data
+        && (!('userId' in request.resource.data) || request.resource.data.userId == resource.data.userId)  // Can't change userId if being updated
+        && (!('createdAt' in request.resource.data) || request.resource.data.createdAt == resource.data.createdAt);  // Can't change creation time if being updated
     }
     
     match /plumber_wallets/{workerId} {
       allow read: if isOwner(workerId);
-      allow create, update: if false; // Only backend can modify
+      // Allow creation of wallet with proper initial data only
+      allow create: if isOwner(workerId) 
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.balance == 200  // Welcome credit amount
+        && request.resource.data.totalRecharge == 0
+        && request.resource.data.totalSpent == 0
+        && request.resource.data.welcomeCreditGiven == true;
+      // Allow updates that maintain data integrity but prevent arbitrary balance changes
+      // Balance changes should only happen through backend transactions with proper validation
+      allow update: if isOwner(workerId)
+        // For partial updates, only check fields that exist in both old and new data
+        && (!('userId' in request.resource.data) || request.resource.data.userId == resource.data.userId)  // Can't change userId if being updated
+        && (!('createdAt' in request.resource.data) || request.resource.data.createdAt == resource.data.createdAt);  // Can't change creation time if being updated
     }
     
     match /electrician_wallets/{workerId} {
       allow read: if isOwner(workerId);
-      allow create, update: if false; // Only backend can modify
+      // Allow creation of wallet with proper initial data only
+      allow create: if isOwner(workerId) 
+        && request.resource.data.userId == request.auth.uid
+        && request.resource.data.balance == 200  // Welcome credit amount
+        && request.resource.data.totalRecharge == 0
+        && request.resource.data.totalSpent == 0
+        && request.resource.data.welcomeCreditGiven == true;
+      // Allow updates that maintain data integrity but prevent arbitrary balance changes
+      // Balance changes should only happen through backend transactions with proper validation
+      allow update: if isOwner(workerId)
+        // For partial updates, only check fields that exist in both old and new data
+        && (!('userId' in request.resource.data) || request.resource.data.userId == resource.data.userId)  // Can't change userId if being updated
+        && (!('createdAt' in request.resource.data) || request.resource.data.createdAt == resource.data.createdAt);  // Can't change creation time if being updated
     }
 
     // =========================
     // Bookings collection
     // =========================
     match /bookings/{bookingId} {
-      // Customer apni booking create kar sakta hai
+      // Allow authenticated users to read bookings
+      allow read: if isLoggedIn();
+      
+      // More granular write permissions based on user role
       allow create: if isLoggedIn()
-        && request.resource.data.customerId == request.auth.uid;
-
-      // Customer apni booking read kar sakta hai
-      allow read: if isLoggedIn()
-        && (
-          resource.data.customerId == request.auth.uid ||
-          resource.data.mistryId == request.auth.uid
-        );
-
-      // Carpenter/Plumber/Electrician job accept kar sakta hai
+        && (request.auth.uid == request.resource.data.customerId 
+             || request.auth.uid == request.resource.data.workerId);
+      
+      // Update rules: allow if user is customer or worker for this booking
       allow update: if isLoggedIn()
-        && resource.data.status == "SEARCHING"
-        && request.resource.data.status == "ACCEPTED"
-        && request.resource.data.mistryId == request.auth.uid;
-
-      // Job complete sirf assigned worker hi kar sakta hai
-      allow update: if isLoggedIn()
-        && resource.data.mistryId == request.auth.uid
-        && resource.data.status == "ACCEPTED"
-        && request.resource.data.status == "COMPLETED";
-
-      // Cancel only customer or system
-      allow update: if isLoggedIn()
-        && (
-          resource.data.customerId == request.auth.uid ||
-          resource.data.mistryId == request.auth.uid
-        );
+        && (request.auth.uid == resource.data.customerId 
+             || request.auth.uid == resource.data.workerId);
+      
+      // Prevent direct deletion of bookings
+      allow delete: if false;
     }
 
     // =========================

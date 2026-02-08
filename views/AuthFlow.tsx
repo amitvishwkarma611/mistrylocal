@@ -11,9 +11,10 @@ interface AuthFlowProps {
   language: Language;
   setLanguage: (lang: Language) => void;
   t: (key: keyof typeof translations.EN) => string;
+  selectedProfession?: string; // Add selected profession prop
 }
 
-const AuthFlow: React.FC<AuthFlowProps> = ({ onLogin, language, setLanguage, t }) => {
+const AuthFlow: React.FC<AuthFlowProps> = ({ onLogin, language, setLanguage, t, selectedProfession }) => {
   const [step, setStep] = useState<'role' | 'login'>('role');
   const [authMethod, setAuthMethod] = useState<'phone' | 'email'>('phone'); // Add state for authentication method
   const [isSigningUp, setIsSigningUp] = useState(false); // Track if we're in signup mode
@@ -149,6 +150,7 @@ const AuthFlow: React.FC<AuthFlowProps> = ({ onLogin, language, setLanguage, t }
           phone: user.phoneNumber,
           email: user.email || '', // Store email if available
           role: selectedRole,
+          profession: selectedRole === AppRole.CARPENTER ? (selectedProfession || 'carpenter') : undefined, // Store profession for carpenters
           language: language,
           name: name,
           createdAt: serverTimestamp(),
@@ -158,7 +160,9 @@ const AuthFlow: React.FC<AuthFlowProps> = ({ onLogin, language, setLanguage, t }
         // Give welcome credit for first-time users (only for carpenters)
         if (selectedRole === AppRole.CARPENTER) {
           try {
-            await giveWelcomeCreditIfFirstLogin(user.uid, 'carpenter');
+            // Use the selected profession if available, otherwise default to 'carpenter'
+            const profession = selectedProfession || 'carpenter';
+            await giveWelcomeCreditIfFirstLogin(user.uid, profession);
           } catch (error) {
             console.error('Failed to give welcome credit:', error);
           }
@@ -203,6 +207,7 @@ const AuthFlow: React.FC<AuthFlowProps> = ({ onLogin, language, setLanguage, t }
           uid: user.uid,
           email: user.email,
           role: selectedRole,
+          profession: selectedRole === AppRole.CARPENTER ? (selectedProfession || 'carpenter') : undefined, // Store profession for carpenters
           language: language,
           name: name,
           createdAt: serverTimestamp()
@@ -211,7 +216,9 @@ const AuthFlow: React.FC<AuthFlowProps> = ({ onLogin, language, setLanguage, t }
         // Give welcome credit for first-time users (only for carpenters)
         if (selectedRole === AppRole.CARPENTER) {
           try {
-            await giveWelcomeCreditIfFirstLogin(user.uid, 'carpenter');
+            // Use the selected profession if available, otherwise default to 'carpenter'
+            const profession = selectedProfession || 'carpenter';
+            await giveWelcomeCreditIfFirstLogin(user.uid, profession);
           } catch (error) {
             console.error('Failed to give welcome credit:', error);
           }
@@ -238,6 +245,7 @@ const AuthFlow: React.FC<AuthFlowProps> = ({ onLogin, language, setLanguage, t }
             uid: user.uid,
             email: user.email,
             role: selectedRole,
+            profession: selectedRole === AppRole.CARPENTER ? (selectedProfession || 'carpenter') : undefined, // Store profession for carpenters
             language: language,
             name: name,
             createdAt: serverTimestamp()
@@ -246,7 +254,9 @@ const AuthFlow: React.FC<AuthFlowProps> = ({ onLogin, language, setLanguage, t }
           // Give welcome credit for first-time users (only for carpenters)
           if (selectedRole === AppRole.CARPENTER) {
             try {
-              await giveWelcomeCreditIfFirstLogin(user.uid, 'carpenter');
+              // Use the selected profession if available, otherwise default to 'carpenter'
+              const profession = selectedProfession || 'carpenter';
+              await giveWelcomeCreditIfFirstLogin(user.uid, profession);
             } catch (error) {
               console.error('Failed to give welcome credit:', error);
             }

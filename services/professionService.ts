@@ -55,10 +55,10 @@ export const autoSetWorkerProfession = async (
           rating: 0,
           online: false,
           services: [profession],
-          serviceAreas: [],
+          serviceAreas: ['400707', '400708'], // Default Airoli service areas
           location: { lat: 0, lng: 0 },
           city: '',
-          serviceArea: '',
+          serviceArea: 'airoli', // Default service area
           createdAt: currentTime,
           updatedAt: currentTime,
           profession: profession, // Store the selected profession
@@ -106,6 +106,20 @@ export const getProfessionCollection = (profession: string): string => {
     return "carpenters";
   }
   return profession + "s"; // carpenter -> carpenters, plumber -> plumbers, electrician -> electricians
+};
+
+/**
+ * Get the correct Firestore collection name for wallet based on profession
+ * @param profession - Worker's profession ("carpenter", "plumber", "electrician")
+ * @returns Collection name string for wallet
+ */
+export const getProfessionWalletCollection = (profession: string): string => {
+  const validProfessions = ["carpenter", "plumber", "electrician"];
+  if (!validProfessions.includes(profession)) {
+    console.warn(`Invalid profession "${profession}", defaulting to "carpenter_wallets"`);
+    return "carpenter_wallets";
+  }
+  return profession + "_wallets"; // carpenter -> carpenter_wallets, plumber -> plumber_wallets, electrician -> electrician_wallets
 };
 
 /**

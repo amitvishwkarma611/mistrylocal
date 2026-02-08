@@ -10,9 +10,10 @@ interface CarpenterAuthProps {
   language: Language;
   setLanguage: (lang: Language) => void;
   t: (key: keyof typeof translations.EN) => string;
+  selectedProfession?: string; // Add selected profession prop
 }
 
-const CarpenterAuth: React.FC<CarpenterAuthProps> = ({ onLogin, language, setLanguage, t }) => {
+const CarpenterAuth: React.FC<CarpenterAuthProps> = ({ onLogin, language, setLanguage, t, selectedProfession }) => {
   const [authMethod, setAuthMethod] = useState<'phone' | 'email'>('phone');
   const [isSigningUp, setIsSigningUp] = useState(false);
   const [phone, setPhone] = useState('');
@@ -128,6 +129,7 @@ const CarpenterAuth: React.FC<CarpenterAuthProps> = ({ onLogin, language, setLan
           phone: user.phoneNumber,
           email: user.email || '',
           role: AppRole.CARPENTER,
+          profession: selectedProfession || 'carpenter', // Store the selected profession
           language: language,
           name: name,
           createdAt: serverTimestamp(),
@@ -136,7 +138,9 @@ const CarpenterAuth: React.FC<CarpenterAuthProps> = ({ onLogin, language, setLan
         
         // Give welcome credit for first-time carpenters
         try {
-          await giveWelcomeCreditIfFirstLogin(user.uid, 'carpenter');
+          // Use the selected profession if available, otherwise default to 'carpenter'
+          const profession = selectedProfession || 'carpenter';
+          await giveWelcomeCreditIfFirstLogin(user.uid, profession);
         } catch (error) {
           console.error('Failed to give welcome credit:', error);
         }
@@ -179,6 +183,7 @@ const CarpenterAuth: React.FC<CarpenterAuthProps> = ({ onLogin, language, setLan
           uid: user.uid,
           email: user.email,
           role: AppRole.CARPENTER,
+          profession: selectedProfession || 'carpenter', // Store the selected profession
           language: language,
           name: name,
           createdAt: serverTimestamp()
@@ -186,7 +191,9 @@ const CarpenterAuth: React.FC<CarpenterAuthProps> = ({ onLogin, language, setLan
 
         // Give welcome credit for first-time carpenters
         try {
-          await giveWelcomeCreditIfFirstLogin(user.uid, 'carpenter');
+          // Use the selected profession if available, otherwise default to 'carpenter'
+          const profession = selectedProfession || 'carpenter';
+          await giveWelcomeCreditIfFirstLogin(user.uid, profession);
         } catch (error) {
           console.error('Failed to give welcome credit:', error);
         }
@@ -209,6 +216,7 @@ const CarpenterAuth: React.FC<CarpenterAuthProps> = ({ onLogin, language, setLan
             uid: user.uid,
             email: user.email,
             role: AppRole.CARPENTER,
+            profession: selectedProfession || 'carpenter', // Store the selected profession
             language: language,
             name: name,
             createdAt: serverTimestamp()
@@ -216,7 +224,9 @@ const CarpenterAuth: React.FC<CarpenterAuthProps> = ({ onLogin, language, setLan
           
           // Give welcome credit for first-time carpenters
           try {
-            await giveWelcomeCreditIfFirstLogin(user.uid, 'carpenter');
+            // Use the selected profession if available, otherwise default to 'carpenter'
+            const profession = selectedProfession || 'carpenter';
+            await giveWelcomeCreditIfFirstLogin(user.uid, profession);
           } catch (error) {
             console.error('Failed to give welcome credit:', error);
           }

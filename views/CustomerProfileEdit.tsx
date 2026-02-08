@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Camera, MapPin, Phone, User, Edit3, Save, X, Mail, CheckCircle, AlertCircle, Clock } from 'lucide-react';
+import { Camera, MapPin, Phone, User, Edit3, Save, X, Mail, CheckCircle, AlertCircle, Clock, LogOut } from 'lucide-react';
 import { Customer, Address } from '../types';
 
 interface CustomerProfileEditProps {
@@ -417,6 +417,21 @@ const CustomerProfileEdit: React.FC<CustomerProfileEditProps> = ({
           <p className="text-[11px] font-black text-green-700 uppercase tracking-tighter">Verified Customer</p>
         </div>
       </div>
+      
+      {/* Logout Button */}
+      <button
+        onClick={async () => {
+          try {
+            await import('../firebase').then(({ auth, signOut }) => signOut(auth));
+          } catch (error) {
+            console.error('Logout error:', error);
+          }
+        }}
+        className="mt-6 w-full max-w-xs flex items-center justify-center gap-2 bg-gradient-to-r from-red-500 to-red-600 text-white px-4 py-3 rounded-2xl font-bold text-sm shadow-md hover:shadow-lg transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
+      >
+        <LogOut size={18} />
+        {t('logout')}
+      </button>
     </div>
   );
 };

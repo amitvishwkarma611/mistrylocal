@@ -1,6 +1,6 @@
 import { db } from '../firebase';
 import { doc, getDoc, runTransaction, serverTimestamp } from 'firebase/firestore';
-import { getProfessionCollection } from './professionService';
+import { getProfessionWalletCollection } from './professionService';
 
 // Constants
 const LEAD_CHARGE_AMOUNT = 100;
@@ -14,19 +14,38 @@ const WELCOME_CREDIT_AMOUNT = 200;
  */
 export const getWalletBalance = async (workerId: string, profession: string = 'carpenter'): Promise<number> => {
   try {
-    const collectionName = getProfessionCollection(profession) + '_wallets';
-    const walletDoc = await getDoc(doc(db, collectionName, workerId));
+    // Validate inputs
+    if (!workerId || typeof workerId !== 'string') {
+      console.error('Invalid workerId provided to getWalletBalance:', workerId);
+      return 0;
+    }
+    
+    if (!profession || typeof profession !== 'string') {
+      console.error('Invalid profession provided to getWalletBalance:', profession);
+      return 0;
+    }
+    
+    const collectionName = getProfessionWalletCollection(profession);
+    const walletRef = doc(db, collectionName, workerId);
+    
+    // Add a small delay to prevent too rapid consecutive requests
+    await new Promise(resolve => setTimeout(resolve, 50));
+    
+    const walletDoc = await getDoc(walletRef);
     
     if (walletDoc.exists()) {
       const data = walletDoc.data();
-      return data.balance || 0;
+      // Ensure balance is a number
+      const balance = typeof data.balance === 'number' ? data.balance : 0;
+      return Math.max(0, balance); // Ensure non-negative balance
     }
     
     // If no wallet exists, return 0
     return 0;
   } catch (error) {
     console.error('Error getting wallet balance:', error);
-    throw error;
+    // Return 0 instead of throwing to prevent UI disruptions
+    return 0;
   }
 };
 
@@ -38,7 +57,7 @@ export const getWalletBalance = async (workerId: string, profession: string = 'c
  */
 export const giveWelcomeCreditIfFirstLogin = async (workerId: string, profession: string): Promise<boolean> => {
   try {
-    const collectionName = getProfessionCollection(profession) + '_wallets';
+    const collectionName = getProfessionWalletCollection(profession);
     const walletRef = doc(db, collectionName, workerId);
     
     let creditGiven = false;
@@ -77,12 +96,21 @@ export const giveWelcomeCreditIfFirstLogin = async (workerId: string, profession
  * @returns Promise<void>
  */
 export const addMoneyToWallet = async (workerId: string, amount: number, profession: string = 'carpenter'): Promise<void> => {
-  if (amount <= 0) {
-    throw new Error('Recharge amount must be positive');
+  // Validate inputs
+  if (!workerId || typeof workerId !== 'string') {
+    throw new Error('Invalid workerId provided to addMoneyToWallet');
+  }
+  
+  if (typeof amount !== 'number' || amount <= 0) {
+    throw new Error('Recharge amount must be a positive number');
+  }
+  
+  if (!profession || typeof profession !== 'string') {
+    throw new Error('Invalid profession provided to addMoneyToWallet');
   }
   
   try {
-    const collectionName = getProfessionCollection(profession) + '_wallets';
+    const collectionName = getProfessionWalletCollection(profession);
     const walletRef = doc(db, collectionName, workerId);
     
     await runTransaction(db, async (transaction) => {
@@ -93,30 +121,41 @@ export const addMoneyToWallet = async (workerId: string, amount: number, profess
       
       if (walletDoc.exists()) {
         const walletData = walletDoc.data();
-        currentBalance = walletData.balance || 0;
-        totalRecharge = walletData.totalRecharge || 0;
+        currentBalance = typeof walletData.balance === 'number' ? walletData.balance : 0;
+        totalRecharge = typeof walletData.totalRecharge === 'number' ? walletData.totalRecharge : 0;
       }
       
       const newBalance = currentBalance + amount;
       const newTotalRecharge = totalRecharge + amount;
       
-      transaction.set(walletRef, {
+      const updateData: any = {
         balance: newBalance,
         totalRecharge: newTotalRecharge,
         updatedAt: serverTimestamp(),
-        // Initialize other fields if this is the first transaction
-        ...(walletDoc.exists() ? {} : { 
-          userId: workerId,
-          totalSpent: 0,
-          welcomeCreditGiven: false,
-          createdAt: serverTimestamp()
-        })
-      }, { merge: true });
+      };
+      
+      // Preserve existing fields to satisfy Firestore security rules
+      if (walletDoc.exists()) {
+        const walletData = walletDoc.data();
+        updateData.userId = walletData.userId;
+        updateData.createdAt = walletData.createdAt;
+        console.log(`DEBUG: Updating existing wallet for ${workerId}. Old balance: ${currentBalance}, New balance: ${newBalance}. Old totalRecharge: ${totalRecharge}, New totalRecharge: ${newTotalRecharge}`);
+      } else {
+        updateData.userId = workerId;
+        updateData.totalSpent = 0;
+        updateData.welcomeCreditGiven = false;
+        updateData.createdAt = serverTimestamp();
+        console.log(`DEBUG: Creating new wallet for ${workerId}. Balance: ${newBalance}, totalRecharge: ${newTotalRecharge}`);
+      }
+      
+      transaction.set(walletRef, updateData, { merge: true });
+      console.log(`DEBUG: Wallet recharge transaction prepared for ${workerId}`);
       
       console.log(`✅ Added ₹${amount} to ${profession} ${workerId}'s wallet. New balance: ₹${newBalance}`);
     });
   } catch (error) {
     console.error('Error adding money to wallet:', error);
+    console.log(`DEBUG: Error adding money to wallet for ${workerId}:`, error.message || error);
     throw error;
   }
 };
@@ -130,8 +169,21 @@ export const addMoneyToWallet = async (workerId: string, amount: number, profess
  * @throws 'LOW_BALANCE' if insufficient funds
  */
 export const deductLeadCharge = async (workerId: string, amount: number = LEAD_CHARGE_AMOUNT, profession: string = 'carpenter'): Promise<void> => {
+  // Validate inputs
+  if (!workerId || typeof workerId !== 'string') {
+    throw new Error('Invalid workerId provided to deductLeadCharge');
+  }
+  
+  if (typeof amount !== 'number' || amount <= 0) {
+    throw new Error('Deduction amount must be a positive number');
+  }
+  
+  if (!profession || typeof profession !== 'string') {
+    throw new Error('Invalid profession provided to deductLeadCharge');
+  }
+  
   try {
-    const collectionName = getProfessionCollection(profession) + '_wallets';
+    const collectionName = getProfessionWalletCollection(profession);
     const walletRef = doc(db, collectionName, workerId);
     
     await runTransaction(db, async (transaction) => {
@@ -142,8 +194,8 @@ export const deductLeadCharge = async (workerId: string, amount: number = LEAD_C
       
       if (walletDoc.exists()) {
         const walletData = walletDoc.data();
-        currentBalance = walletData.balance || 0;
-        totalSpent = walletData.totalSpent || 0;
+        currentBalance = typeof walletData.balance === 'number' ? walletData.balance : 0;
+        totalSpent = typeof walletData.totalSpent === 'number' ? walletData.totalSpent : 0;
       } else {
         // No wallet exists, treat as zero balance
         currentBalance = 0;
@@ -160,19 +212,35 @@ export const deductLeadCharge = async (workerId: string, amount: number = LEAD_C
       const newTotalSpent = totalSpent + amount;
       
       // Update wallet document
-      transaction.set(walletRef, {
+      const updateData: any = {
         balance: newBalance,
         totalSpent: newTotalSpent,
         updatedAt: serverTimestamp(),
-        // If this is the first transaction, set lastRecharge to null or initial value
-        ...(walletDoc.exists() ? {} : { lastRecharge: null })
-      }, { merge: true });
+      };
+      
+      // Preserve existing fields to satisfy Firestore security rules
+      if (walletDoc.exists()) {
+        const walletData = walletDoc.data();
+        updateData.userId = walletData.userId;
+        updateData.createdAt = walletData.createdAt;
+        console.log(`DEBUG: Updating existing wallet for ${workerId}. Old balance: ${currentBalance}, New balance: ${newBalance}. Old totalSpent: ${totalSpent}, New totalSpent: ${newTotalSpent}`);
+      } else {
+        updateData.userId = workerId;
+        updateData.createdAt = serverTimestamp();
+        updateData.lastRecharge = null;
+        console.log(`DEBUG: Creating new wallet for ${workerId}. Balance: ${newBalance}, totalSpent: ${newTotalSpent}`);
+      }
+      
+      transaction.set(walletRef, updateData, { merge: true });
+      console.log(`DEBUG: Wallet update transaction prepared for ${workerId}`);
     });
   } catch (error: any) {
     if (error.message === 'LOW_BALANCE') {
+      console.log(`DEBUG: Low balance error for ${workerId}: current balance insufficient for deduction of ${amount}`);
       throw error;
     }
     console.error('Error deducting lead charge:', error);
+    console.log(`DEBUG: Error deducting lead charge for ${workerId}:`, error.message || error);
     throw error;
   }
 };
@@ -192,18 +260,45 @@ export const getWalletInfo = async (workerId: string, profession: string = 'carp
   createdAt: any;
   updatedAt: any;
 } | null> => {
+  // Validate inputs
+  if (!workerId || typeof workerId !== 'string') {
+    console.error('Invalid workerId provided to getWalletInfo:', workerId);
+    return null;
+  }
+  
+  if (!profession || typeof profession !== 'string') {
+    console.error('Invalid profession provided to getWalletInfo:', profession);
+    return null;
+  }
+  
   try {
-    const collectionName = getProfessionCollection(profession) + '_wallets';
-    const walletDoc = await getDoc(doc(db, collectionName, workerId));
+    const collectionName = getProfessionWalletCollection(profession);
+    const walletRef = doc(db, collectionName, workerId);
+    
+    // Add a small delay to prevent too rapid consecutive requests
+    await new Promise(resolve => setTimeout(resolve, 50));
+    
+    const walletDoc = await getDoc(walletRef);
     
     if (walletDoc.exists()) {
-      return walletDoc.data() as any;
+      const data = walletDoc.data();
+      // Ensure numeric fields are numbers
+      return {
+        balance: typeof data.balance === 'number' ? data.balance : 0,
+        totalRecharge: typeof data.totalRecharge === 'number' ? data.totalRecharge : 0,
+        totalSpent: typeof data.totalSpent === 'number' ? data.totalSpent : 0,
+        welcomeCreditGiven: typeof data.welcomeCreditGiven === 'boolean' ? data.welcomeCreditGiven : false,
+        lastRecharge: data.lastRecharge || null,
+        createdAt: data.createdAt || null,
+        updatedAt: data.updatedAt || null,
+      };
     }
     
     return null;
   } catch (error) {
     console.error('Error getting wallet info:', error);
-    throw error;
+    // Return null instead of throwing to prevent UI disruptions
+    return null;
   }
 };
 

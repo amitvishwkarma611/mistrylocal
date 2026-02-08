@@ -16,6 +16,7 @@ import { db } from '../firebase';
 import { JobStatus } from '../types';
 import { getServiceAreaByPincode, RESTRICTED_AREA_MESSAGE } from '../serviceAreas';
 import { getProfessionCollection, getWorkerProfessionSafe } from './professionService';
+import { recalculateTrustScore } from './trustScoreService';
 
 // GLOBAL WRITE OPERATION TRACKING
 // Prevent excessive write operations that could cause quota exhaustion
@@ -219,7 +220,6 @@ export interface CarpenterData {
   ratingCount?: number;
   // EARNINGS DATA (may not exist in current documents)
   weeklyEarnings?: number;
-  walletBalance?: number;
 }
 
 // ACCEPT JOB CONCURRENCY GUARD
@@ -336,11 +336,17 @@ export const acceptJobWithNotification = async (
       return false; // Already being processed
     }
     
+    // Get the correct profession for the worker
+    const workerProfessionForWallet = await getWorkerProfessionSafe(carpenterId);
+    
     // WALLET DEDUCTION: Check and deduct ₹100 lead charge BEFORE proceeding
     try {
+      console.log(`DEBUG: About to deduct lead charge for ${carpenterId} (profession: ${workerProfessionForWallet})`);
       const { deductLeadCharge } = await import('./walletService');
-      await deductLeadCharge(carpenterId, 100);
+      await deductLeadCharge(carpenterId, 100, workerProfessionForWallet);
+      console.log(`DEBUG: Successfully deducted lead charge for ${carpenterId}`);
     } catch (error: any) {
+      console.log(`DEBUG: Error during lead charge deduction for ${carpenterId}:`, error.message || error);
       if (error.message === 'LOW_BALANCE') {
         if (typeof window !== 'undefined') {
           alert('Low balance. Please recharge wallet.');
@@ -659,6 +665,14 @@ const pollForBookings = async (serviceAreas: string[], serviceAreaFilter?: strin
       console.log(`📍 Service area filter: ${serviceAreaFilter}`);
     }
     console.log(`🔧 Worker profession: ${workerProfession}`);
+    console.log(`📋 Total bookings found: ${bookings.length}`);
+    console.log(`📋 Booking details:`, bookings.map(b => ({
+      id: b.id,
+      serviceType: b.serviceType,
+      status: b.status,
+      pincode: b.pincode,
+      serviceArea: b.serviceArea
+    })));
     
     // Notify callback if available - ONLY for searching jobs
     if (pollingCallback) {
@@ -678,6 +692,7 @@ const pollForBookings = async (serviceAreas: string[], serviceAreaFilter?: strin
           const workerProfession = await getWorkerProfessionSafe(carpenterId);
           
           // For filtering, we need to check if booking service matches worker's profession
+          // Workers should be able to see jobs that match their profession
           const canHandleService = bookingServiceType === workerProfession;
           
           if (!canHandleService) {
@@ -693,6 +708,13 @@ const pollForBookings = async (serviceAreas: string[], serviceAreaFilter?: strin
       const searchingJobs = await filterBookings();
       
       console.log(`📊 Found ${searchingJobs.length} matching searching bookings (filtered from ${bookings.length} total)`);
+      console.log(`📋 Filtered booking details:`, searchingJobs.map(b => ({
+        id: b.id,
+        serviceType: b.serviceType,
+        status: b.status,
+        pincode: b.pincode,
+        serviceArea: b.serviceArea
+      })));
       pollingCallback(searchingJobs);
     }
   } catch (error) {
@@ -1009,6 +1031,25 @@ export const submitBookingRating = async (bookingId: string, ratingValue: number
         updatedAt: serverTimestamp()
       });
       
+      // Update trust score for the assigned carpenter if applicable
+      const bookingDoc = await getDoc(bookingRef);
+      if (bookingDoc.exists()) {
+        const bookingData = bookingDoc.data() as BookingData;
+        if (bookingData.assignedCarpenterId) {
+          try {
+            // Recalculate trust score for the carpenter based on the new rating
+            const { recalculateTrustScore } = await import('./trustScoreService');
+            const { getWorkerProfessionSafe } = await import('./professionService');
+            
+            const profession = await getWorkerProfessionSafe(bookingData.assignedCarpenterId);
+            await recalculateTrustScore(bookingData.assignedCarpenterId, profession);
+          } catch (trustError) {
+            console.error('Error updating trust score after rating submission:', trustError);
+            // Don't throw this error as it shouldn't prevent the rating submission
+          }
+        }
+      }
+      
       if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
         console.log(`✅ Rating submitted for booking ${bookingId}: ${ratingValue} stars`);
       }
@@ -1137,6 +1178,19 @@ export const updateBookingStatus = async (bookingId: string, status: JobStatus):
           if (bookingData.assignedCarpenterId) {
             try {
               await releaseCarpenterJob(bookingData.assignedCarpenterId, bookingId);
+              
+              // If the status is COMPLETED, recalculate trust score for the carpenter
+              if (status === JobStatus.COMPLETED) {
+                try {
+                  const { recalculateTrustScore } = await import('./trustScoreService');
+                  const { getWorkerProfessionSafe } = await import('./professionService');
+                  const profession = await getWorkerProfessionSafe(bookingData.assignedCarpenterId);
+                  await recalculateTrustScore(bookingData.assignedCarpenterId, profession);
+                } catch (trustError) {
+                  console.error('Error updating trust score after job completion:', trustError);
+                  // Don't throw this error as it shouldn't prevent the status update
+                }
+              }
             } catch (error) {
               if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
                 console.warn('Warning: Failed to release carpenter job:', error);
@@ -1531,6 +1585,16 @@ export const updateCarpenterProfile = async (carpenterId: string, updatedFields:
       updateData.updatedAt = serverTimestamp();
       
       await updateDoc(workerRef, updateData);
+      
+      // Check if jobsCompleted or rating fields were updated to trigger trust score recalculation
+      if ('jobsCompleted' in updateData || 'rating' in updateData || 'ratingCount' in updateData) {
+        try {
+          await recalculateTrustScore(carpenterId, profession);
+        } catch (trustError) {
+          console.error('Error recalculating trust score after profile update:', trustError);
+          // Don't throw this error as it shouldn't prevent the profile update
+        }
+      }
       
       if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
         console.log(`Worker ${carpenterId} profile updated in ${collectionName} collection with fields:`, Object.keys(updateData));

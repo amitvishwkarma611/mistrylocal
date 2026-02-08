@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useRef, Component } from 'react';
+import { WalletProvider } from './contexts/WalletContext';
 import { AppRole, Booking, JobStatus, Carpenter, Customer } from './types';
 import CustomerHome from './views/CustomerHome';
 import CarpenterPortal from './views/CarpenterPortal';
@@ -73,6 +74,20 @@ const App: React.FC = () => {
               phone: userData.phone || firebaseUser.phoneNumber || "",
               uid: firebaseUser.uid
             });
+            
+            // For carpenters, ensure welcome credit is given if not already received
+            if (userData.role === AppRole.CARPENTER) {
+              try {
+                const { giveWelcomeCreditIfFirstLogin } = await import('./services/walletService');
+                const { getWorkerProfessionSafe } = await import('./services/professionService');
+                // Get the correct profession for the worker from their profile or localStorage
+                const profession = await getWorkerProfessionSafe(firebaseUser.uid) || localStorage.getItem('selectedProfession') || 'carpenter';
+                await giveWelcomeCreditIfFirstLogin(firebaseUser.uid, profession);
+              } catch (error) {
+                console.error('Failed to give welcome credit on auth state change:', error);
+              }
+            }
+            
             setShowAuth(false); // Hide auth screen when logged in
           } else {
             // User exists in Firebase Auth but not in Firestore
@@ -129,7 +144,6 @@ const App: React.FC = () => {
               profilePhotoUrl: typeof data.profilePhotoUrl === 'string' ? data.profilePhotoUrl : undefined,
               // Earnings fields (may not exist in current data)
               weeklyEarnings: typeof data.weeklyEarnings === 'number' ? data.weeklyEarnings : 0,
-              walletBalance: typeof data.walletBalance === 'number' ? data.walletBalance : 0,
               // Timestamps (may not exist)
               createdAt: data.createdAt,
               updatedAt: data.updatedAt
@@ -152,8 +166,7 @@ const App: React.FC = () => {
               lat: 0,
               lng: 0,
               trustScore: 0,
-              weeklyEarnings: 0,
-              walletBalance: 0
+              weeklyEarnings: 0
             });
           }
         } catch (error) {
@@ -356,6 +369,8 @@ const App: React.FC = () => {
       // Calculate average rating from completed bookings that have been rated
       const ratedBookings = completedBookings.filter(b => b.ratingSubmitted);
       let avgRating = 0;
+      let ratingCount = ratedBookings.length;
+      
       if (ratedBookings.length > 0) {
         const totalRating = ratedBookings.reduce((sum, booking) => sum + (booking.ratingValue || 0), 0);
         avgRating = totalRating / ratedBookings.length;
@@ -367,14 +382,16 @@ const App: React.FC = () => {
         
         // Only update if values have changed to prevent unnecessary re-renders
         if (prev.jobsCompleted === jobsCompleted && 
-            Math.abs((prev.rating || 0) - avgRating) < 0.01) {
+            Math.abs((prev.rating || 0) - avgRating) < 0.01 &&
+            prev.ratingCount === ratingCount) {
           return prev;
         }
         
         const updatedProfile = {
           ...prev,
           jobsCompleted,
-          rating: avgRating
+          rating: avgRating,
+          ratingCount
         };
         
         // Also update the values in Firestore to persist them
@@ -383,8 +400,15 @@ const App: React.FC = () => {
             const { updateCarpenterProfile } = await import('./services/bookingService');
             await updateCarpenterProfile(user.uid, {
               jobsCompleted,
-              rating: avgRating
+              rating: avgRating,
+              ratingCount
             });
+            
+            // Update trust score based on new stats
+            const { recalculateTrustScore } = await import('./services/trustScoreService');
+            const { getWorkerProfessionSafe } = await import('./services/professionService');
+            const profession = await getWorkerProfessionSafe(user.uid);
+            await recalculateTrustScore(user.uid, profession);
           } catch (error) {
             console.error('Error updating carpenter stats in Firestore:', error);
           }
@@ -647,6 +671,16 @@ const App: React.FC = () => {
         if (selectedProfession) {
           localStorage.setItem('selectedProfession', selectedProfession);
         }
+        
+        // Check and give welcome credit if not already given
+        const { giveWelcomeCreditIfFirstLogin } = await import('./services/walletService');
+        try {
+          // Use the selected profession, or fall back to stored profession or default to 'carpenter'
+          const profession = selectedProfession || storedProfession || 'carpenter';
+          await giveWelcomeCreditIfFirstLogin(uid, profession);
+        } catch (error) {
+          console.error('Failed to give welcome credit on login:', error);
+        }
       } catch (error) {
         console.error('Error auto-setting worker profession:', error);
         // Continue with login even if profession setting fails
@@ -769,6 +803,7 @@ const App: React.FC = () => {
   }, [bookings]); // Only re-run when bookings change
 
   return (
+    <WalletProvider userId={user?.uid}>
     <div className="mobile-container flex flex-col min-h-screen border-x border-gray-100 relative overflow-hidden">
       {showAuth ? (
         authRole === null ? (
@@ -901,6 +936,7 @@ const App: React.FC = () => {
             language={language}
             setLanguage={setLanguage}
             t={t}
+            selectedProfession={selectedProfession || 'carpenter'}
           />
         )
       ) : (
@@ -1049,6 +1085,7 @@ const App: React.FC = () => {
         </nav>
       )}
     </div>
+    </WalletProvider>
   );
 };
 

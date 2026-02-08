@@ -1,7 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { Camera, MapPin, Phone, User, ShieldCheck, IndianRupee, Edit3, Save, X, Star } from 'lucide-react';
+import { Camera, MapPin, Phone, User, ShieldCheck, IndianRupee, Edit3, Save, X, Star, LogOut } from 'lucide-react';
 import { Carpenter, Address, AddressProof } from '../types';
 import { getWalletBalance, rechargeWallet } from '../services/walletService';
+import { auth, signOut } from '../firebase';
+import { useWallet } from '../contexts/WalletContext';
 
 // Declare Razorpay global type
 declare global {
@@ -28,7 +30,7 @@ const CarpenterProfileEdit: React.FC<CarpenterProfileEditProps> = ({
   const [isEditing, setIsEditing] = useState(false);
   const [editedProfile, setEditedProfile] = useState<Partial<Carpenter>>({});
   const [isSaving, setIsSaving] = useState(false);
-  const [walletBalance, setWalletBalance] = useState<number>(0); // Wallet balance state
+  const { walletBalance, refreshWalletBalance } = useWallet(); // Wallet balance from context
   const [isProcessingPayment, setIsProcessingPayment] = useState(false); // Payment processing state
 
   useEffect(() => {
@@ -40,6 +42,16 @@ const CarpenterProfileEdit: React.FC<CarpenterProfileEditProps> = ({
       });
     }
   }, [carpenterProfile]);
+
+  // Logout function
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      // Optionally redirect or update UI after logout
+    } catch (error) {
+      console.error('Logout error:', error);
+    }
+  };
 
   const handleCancel = () => {
     // Reset the edited profile to original values
@@ -58,21 +70,7 @@ const CarpenterProfileEdit: React.FC<CarpenterProfileEditProps> = ({
     }
   };
 
-  // Fetch wallet balance when component mounts
-  useEffect(() => {
-    const fetchWalletBalance = async () => {
-      if (user && user.uid) {
-        try {
-          const balance = await getWalletBalance(user.uid);
-          setWalletBalance(balance);
-        } catch (error) {
-          console.error('Error fetching wallet balance:', error);
-        }
-      }
-    };
-    
-    fetchWalletBalance();
-  }, [user]);
+  // Wallet balance is managed by context, no need to fetch here
 
   // Handle ESC key to cancel editing
   useEffect(() => {
@@ -164,6 +162,16 @@ const CarpenterProfileEdit: React.FC<CarpenterProfileEditProps> = ({
     setIsProcessingPayment(true);
     
     try {
+      if (!window.Razorpay) {
+        alert('Payment gateway not loaded. Please refresh the page and try again.');
+        setIsProcessingPayment(false);
+        return;
+      }
+      
+      // Get the profession for this worker to recharge the correct wallet
+      const { getWorkerProfessionSafe } = await import('../services/professionService');
+      const profession = await getWorkerProfessionSafe(user.uid);
+      
       // Amount in paisa (500 INR = 50000 paisa)
       const amount = 50000;
       const currency = 'INR';
@@ -194,16 +202,17 @@ const CarpenterProfileEdit: React.FC<CarpenterProfileEditProps> = ({
           try {
             // In a real implementation, verify payment on backend first
             // Then update wallet balance
-            await rechargeWallet(user.uid, 500, 'carpenter');
+            await rechargeWallet(user.uid, 500, profession);
             
-            // Refresh wallet balance
-            const newBalance = await getWalletBalance(user.uid, 'carpenter');
-            setWalletBalance(newBalance);
+            // Refresh wallet balance from context
+            await refreshWalletBalance(true); // Force refresh to bypass rate limiting
             
             alert('Payment successful! ₹500 added to your wallet.');
           } catch (error) {
             console.error('Error updating wallet:', error);
             alert('Payment successful but wallet update failed. Please contact support.');
+          } finally {
+            setIsProcessingPayment(false);
           }
         },
         prefill: {
@@ -659,6 +668,15 @@ const CarpenterProfileEdit: React.FC<CarpenterProfileEditProps> = ({
             <p className="text-xs font-medium text-green-600">Professional Carpenter Profile</p>
           </div>
         </div>
+        
+        {/* Logout Button */}
+        <button
+          onClick={handleLogout}
+          className="mt-6 w-full max-w-xs flex items-center justify-center gap-2 bg-gradient-to-r from-red-500 to-red-600 text-white px-4 py-3 rounded-2xl font-bold text-sm shadow-md hover:shadow-lg transition-all duration-200 hover:scale-[1.02] active:scale-[0.98]"
+        >
+          <LogOut size={18} />
+          {t('logout')}
+        </button>
       </div>
     </div>
   );

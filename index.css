@@ -258,3 +258,164 @@ button:not(.no-transition):active {
 .backdrop-blur-md {
   backdrop-filter: blur(12px);
 }
+
+/* Mobile-first responsive design */
+@media (max-width: 480px) {
+  .mobile-container {
+    max-width: 100%;
+    margin: 0;
+    border-radius: 0;
+    box-shadow: none;
+    border-left: none;
+    border-right: none;
+  }
+  
+  /* Adjust padding for smaller screens */
+  .mobile-container .p-8 {
+    padding: 1.5rem;
+  }
+  
+  .mobile-container .p-6 {
+    padding: 1.25rem;
+  }
+  
+  .mobile-container .p-4 {
+    padding: 1rem;
+  }
+  
+  /* Font size adjustments for small screens */
+  .mobile-container .text-5xl {
+    font-size: 2.5rem;
+  }
+  
+  .mobile-container .text-4xl {
+    font-size: 2rem;
+  }
+}
+
+@media (max-width: 375px) {
+  .mobile-container .p-8 {
+    padding: 1rem;
+  }
+  
+  .mobile-container .text-5xl {
+    font-size: 2rem;
+  }
+  
+  .mobile-container .text-4xl {
+    font-size: 1.75rem;
+  }
+  
+  .mobile-container .text-3xl {
+    font-size: 1.5rem;
+  }
+}
+
+/* Tablet responsiveness */
+@media (min-width: 481px) and (max-width: 768px) {
+  .mobile-container {
+    max-width: 90%;
+    margin: 1rem auto;
+    border-radius: 8px;
+  }
+}
+
+/* Desktop responsiveness */
+@media (min-width: 769px) {
+  .mobile-container {
+    max-width: 480px;
+    margin: 2rem auto;
+    border-radius: 8px;
+  }
+}
+
+/* Remove gradient overlay on very small screens */
+@media (max-width: 320px) {
+  .mobile-container::before {
+    height: 2px;
+  }
+}
+
+/* Touch-friendly adjustments */
+@media (hover: none) and (pointer: coarse) {
+  button:not(.no-transition):hover {
+    transform: none;
+    box-shadow: none;
+  }
+  
+  button:not(.no-transition):active {
+    transform: translateY(-1px);
+  }
+  
+  .card-hover:hover {
+    transform: none;
+    box-shadow: none;
+  }
+  
+  .card-hover:active {
+    transform: translateY(-2px);
+  }
+}
+
+/* Prevent zoom on iOS Safari */
+@media screen and (-webkit-min-device-pixel-ratio: 2) {
+  select,
+  textarea,
+  input[type=\"text\"],
+  input[type=\"tel\"],
+  input[type=\"email\"] {
+    font-size: 16px;
+  }
+}
+
+/* Improved scrolling for mobile */
+.mobile-container {
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Better tap targets for mobile */
+@media (max-width: 768px) {
+  button,
+  .tap-target {
+    min-height: 44px;
+    min-width: 44px;
+  }
+}
+
+/* Orientation handling */
+@media (orientation: landscape) and (max-height: 500px) {
+  .mobile-container .p-8 {
+    padding: 1rem;
+  }
+  
+  .mobile-container .min-h-screen {
+    min-height: auto;
+  }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .mobile-container {
+    border: 1px solid #000;
+  }
+  
+  .mobile-container::before {
+    height: 2px;
+  }
+}
+
+/* Reduced motion support */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  ::before,
+  ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+  
+  .float-animation,
+  .pulse-animation {
+    animation: none;
+  }
+}

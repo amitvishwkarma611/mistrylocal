@@ -17,6 +17,7 @@ import { JobStatus } from '../types';
 import { getServiceAreaByPincode, RESTRICTED_AREA_MESSAGE } from '../serviceAreas';
 import { getProfessionCollection, getWorkerProfessionSafe } from './professionService';
 import { recalculateTrustScore } from './trustScoreService';
+import { getWalletBalance, deductLeadCharge } from './walletService';
 
 // GLOBAL WRITE OPERATION TRACKING
 // Prevent excessive write operations that could cause quota exhaustion
@@ -339,21 +340,21 @@ export const acceptJobWithNotification = async (
     // Get the correct profession for the worker
     const workerProfessionForWallet = await getWorkerProfessionSafe(carpenterId);
     
-    // WALLET DEDUCTION: Check and deduct ₹100 lead charge BEFORE proceeding
+    // WALLET CHECK: Check if worker has sufficient balance BEFORE proceeding
+    // Actual deduction will happen after successful transaction
     try {
-      console.log(`DEBUG: About to deduct lead charge for ${carpenterId} (profession: ${workerProfessionForWallet})`);
-      const { deductLeadCharge } = await import('./walletService');
-      await deductLeadCharge(carpenterId, 100, workerProfessionForWallet);
-      console.log(`DEBUG: Successfully deducted lead charge for ${carpenterId}`);
-    } catch (error: any) {
-      console.log(`DEBUG: Error during lead charge deduction for ${carpenterId}:`, error.message || error);
-      if (error.message === 'LOW_BALANCE') {
+      console.log(`DEBUG: Checking wallet balance for ${carpenterId} (profession: ${workerProfessionForWallet})`);
+      const balance = await getWalletBalance(carpenterId, workerProfessionForWallet);
+      if (balance < 100) {
         if (typeof window !== 'undefined') {
           alert('Low balance. Please recharge wallet.');
         }
         return false;
       }
-      throw error; // Re-throw other errors
+      console.log(`DEBUG: Wallet check passed for ${carpenterId}. Balance: ₹${balance}`);
+    } catch (error: any) {
+      console.log(`DEBUG: Error checking wallet balance for ${carpenterId}:`, error.message || error);
+      return false;
     }
     
     // CONCURRENCY GUARD: Prevent multiple simultaneous calls for same booking
@@ -482,7 +483,19 @@ export const acceptJobWithNotification = async (
         });
       });
       
-      // SUCCESS: Update local tracking
+      // SUCCESS: Deduct wallet AFTER transaction succeeds
+      try {
+        console.log(`DEBUG: About to deduct lead charge for successful job acceptance by ${carpenterId}`);
+        await deductLeadCharge(carpenterId, 100, workerProfessionForWallet);
+        console.log(`DEBUG: Successfully deducted lead charge for ${carpenterId} after job acceptance`);
+      } catch (walletError: any) {
+        console.error(`❌ Wallet deduction failed after successful job acceptance for ${carpenterId}:`, walletError);
+        // Even if wallet deduction fails, the job acceptance was successful
+        // The worker gets the job but we couldn't deduct the fee
+        // This is a rare edge case that should be handled by admin
+      }
+      
+      // Update local tracking
       carpenterActiveJobs.set(carpenterId, bookingId);
       if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
         console.log(`✅ Job ${bookingId} accepted by carpenter ${carpenterId}`);

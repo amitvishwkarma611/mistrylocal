@@ -85,3 +85,51 @@ self.addEventListener('activate', (event) => {
     })
   );
 });
+
+// Handle background push notifications
+self.addEventListener('push', (event) => {
+  console.log('Push notification received:', event);
+  
+  if (!event.data) {
+    console.log('No data in push event');
+    return;
+  }
+  
+  const data = event.data.json();
+  console.log('Push data:', data);
+  
+  const title = data.notification?.title || 'New Notification';
+  const options = {
+    body: data.notification?.body || 'You have a new notification',
+    icon: data.notification?.icon || '/icons/icon-192x192.png',
+    badge: '/icons/icon-192x192.png',
+    tag: 'mistry-notification',
+    data: data.data || {}
+  };
+  
+  event.waitUntil(
+    self.registration.showNotification(title, options)
+  );
+});
+
+// Handle notification clicks
+self.addEventListener('notificationclick', (event) => {
+  console.log('Notification clicked:', event);
+  
+  event.notification.close();
+  
+  // Focus existing tab or open new one
+  event.waitUntil(
+    clients.matchAll({ type: 'window' }).then((clientList) => {
+      for (const client of clientList) {
+        if (client.url && 'focus' in client) {
+          client.focus();
+          return;
+        }
+      }
+      if (clients.openWindow) {
+        return clients.openWindow('/');
+      }
+    })
+  );
+});

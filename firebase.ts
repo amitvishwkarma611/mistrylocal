@@ -20,6 +20,7 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, signInWithPhoneNumber, RecaptchaVerifier, onAuthStateChanged, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword, EmailAuthProvider } from "firebase/auth";
 import { getFirestore, doc, getDoc, setDoc, serverTimestamp, collection, query, orderBy, limit, addDoc, updateDoc } from "firebase/firestore";
+import { getMessaging, getToken } from "firebase/messaging";
 
 // Replace with your actual Firebase Project config
 const firebaseConfig = {
@@ -35,6 +36,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+const messaging = typeof window !== 'undefined' ? getMessaging(app) : null;
 
 // Enable persistence (default for web auth SDK)
 auth.languageCode = 'en'; // Can be updated dynamically
@@ -61,4 +63,25 @@ export {
   limit,
   addDoc,
   updateDoc
+};
+
+export const generateFCMToken = async (): Promise<void> => {
+  if (!messaging) return;
+  
+  try {
+    const permission = await Notification.requestPermission();
+    if (permission !== 'granted') return;
+    
+    const token = await getToken(messaging, {
+      vapidKey: 'BH6D2mE26nsF1VinWSfBFx-2ES-ijPtYhR9Ebo4ZPB0FZbXVxMSo8L3jPotMg5zc0b7HVIUOJJpimimcJ0_imY8'
+    });
+    
+    if (token) {
+      console.log('FCM Token generated:', token);
+      // Store token in localStorage for later use
+      localStorage.setItem('fcm_token', token);
+    }
+  } catch (error) {
+    console.error('Error generating FCM token:', error);
+  }
 };

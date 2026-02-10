@@ -1,5 +1,6 @@
 
 import React, { useState, useEffect, useRef, Component } from 'react';
+import { generateFCMToken } from "./firebase";
 import { WalletProvider } from './contexts/WalletContext';
 import { AppRole, Booking, JobStatus, Carpenter, Customer } from './types';
 import CustomerHome from './views/CustomerHome';
@@ -67,6 +68,11 @@ const App: React.FC = () => {
     if (urlParams.get('admin') === 'true') {
       setShowAdminPanel(true);
     }
+  }, []);
+
+  // FCM startup trigger
+  useEffect(() => {
+    generateFCMToken();
   }, []);
 
   // Admin mode toggle (press Ctrl+A to open admin page)

@@ -22,7 +22,7 @@ export const getWorkerFCMToken = async (): Promise<string | null> => {
     const permission = await Notification.requestPermission();
     if (permission !== 'granted') return null;
     
-    const vapidKey = 'BH6D2mE26nsF1VinWSfBFx-2ES-ijPtYhR9Ebo4ZPB0FZbXVxMSo8L3jPotMg5zc0b7HVIUOJJpimimcJ0_imY8';
+    const vapidKey = 'BKPxQFVLQr3vX-iG8vNjU7NfaDsgzWtm2e3rJPFOnac_6PNJz5azLA2cvxdo9cX09-4RUtIT2C6vwR_8mcHvBzU';
     const token = await getToken(msg, { vapidKey });
     return token || null;
   } catch (error) {

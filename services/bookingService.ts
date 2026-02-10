@@ -323,7 +323,7 @@ export const createBookingWithDistribution = async (
  * @param carpenterName - Name of the carpenter accepting the job
  * @returns Promise<boolean> - True if accepted successfully, false if already taken
  */
-export const acceptJobWithNotification = async (
+export const acceptJob = async (
   bookingId: string, 
   carpenterId: string, 
   carpenterName: string
@@ -792,9 +792,7 @@ export const createBooking = async (bookingData: Omit<BookingData, 'id' | 'statu
  * @param carpenterName - Name of the carpenter accepting the job
  * @returns Promise<boolean> - True if accepted successfully
  */
-export const acceptJob = async (bookingId: string, carpenterId: string, carpenterName: string): Promise<boolean> => {
-  return acceptJobWithNotification(bookingId, carpenterId, carpenterName);
-};
+
 
 /**
  * Checks if an accepted booking has timed out and handles the timeout if needed

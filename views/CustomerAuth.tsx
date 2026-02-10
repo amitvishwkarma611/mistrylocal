@@ -3,6 +3,7 @@ import { AppRole } from '../types';
 import { Language, translations } from '../translations';
 import { auth, db, RecaptchaVerifier, signInWithPhoneNumber, signInWithEmailAndPassword, createUserWithEmailAndPassword, doc, getDoc, setDoc, serverTimestamp } from '../firebase';
 import { ArrowRight, Phone, Mail, ShieldCheck, User, ChevronLeft, Smartphone, AtSign, Loader2 } from 'lucide-react';
+import { SkeletonCard } from '../components/SkeletonLoader';
 
 interface CustomerAuthProps {
   onLogin: (role: AppRole, identifier: string, name: string, uid: string) => void;

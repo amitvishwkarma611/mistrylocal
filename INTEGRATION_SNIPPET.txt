@@ -1,0 +1,12 @@
+// INTEGRATION SNIPPET - Add to CarpenterPortal.tsx mount effect
+// Location: Inside useEffect hook where worker login/portal mounts
+
+import { initializeWorkerNotifications } from '../src/notifications/workerNotificationIntegration';
+
+// Add this inside the existing useEffect that runs on component mount
+useEffect(() => {
+  if (user?.uid && user?.role === 'carpenter') {
+    // Non-intrusive token initialization
+    initializeWorkerNotifications(user.uid, 'carpenter');
+  }
+}, [user]); // Only depends on user, no logic changes

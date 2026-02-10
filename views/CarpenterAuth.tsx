@@ -4,6 +4,7 @@ import { Language, translations } from '../translations';
 import { auth, db, RecaptchaVerifier, signInWithPhoneNumber, signInWithEmailAndPassword, createUserWithEmailAndPassword, doc, getDoc, setDoc, serverTimestamp } from '../firebase';
 import { ArrowRight, Phone, Mail, ShieldCheck, Hammer, ChevronLeft, Smartphone, AtSign, Loader2 } from 'lucide-react';
 import { giveWelcomeCreditIfFirstLogin } from '../services/walletService';
+import { SkeletonCard } from '../components/SkeletonLoader';
 
 interface CarpenterAuthProps {
   onLogin: (role: AppRole, identifier: string, name: string, uid: string) => void;

@@ -4,10 +4,11 @@ import { Star, BadgeCheck, Phone, CheckCircle, Clock, MapPin, IndianRupee, Navig
 import { Booking, JobStatus, AppRole, Carpenter } from '../types';
 import { translations } from '../translations';
 import { setCarpenterOnlineStatus, startPollingSearchingBookings, stopPollingSearchingBookings, acceptJob, createOrUpdateCarpenter, BookingData } from '../services/bookingService';
-import { doc, getDoc } from 'firebase/firestore';
+import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { getWalletBalance, getWalletInfo } from '../services/walletService';
 import { useWallet } from '../contexts/WalletContext';
+
 
 interface CarpenterPortalProps {
   bookings: Booking[];

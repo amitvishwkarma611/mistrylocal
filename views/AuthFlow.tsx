@@ -5,6 +5,7 @@ import { Language, translations } from '../translations';
 import { auth, db, RecaptchaVerifier, signInWithPhoneNumber, signInWithEmailAndPassword, createUserWithEmailAndPassword, doc, getDoc, setDoc, serverTimestamp } from '../firebase';
 import { giveWelcomeCreditIfFirstLogin } from '../services/walletService';
 import { ArrowRight, Phone, Mail, ShieldCheck, User, Hammer, ChevronLeft, Smartphone, AtSign, Loader2 } from 'lucide-react';
+import { SkeletonCard } from '../components/SkeletonLoader';
 
 interface AuthFlowProps {
   onLogin: (role: AppRole, identifier: string, name: string, uid: string) => void; // identifier can be phone or email

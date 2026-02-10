@@ -8,6 +8,7 @@ import { Camera, Star, BadgeCheck, Loader2, X, ArrowRight, Hammer, PenLine, Rada
 import { createBooking } from '../services/bookingService';
 import { SERVICE_LIST } from '../data/serviceList';
 import { applyMinimumPrice } from '../services/priceService';
+import SkeletonWrapper from '../components/SkeletonWrapper';
 
 interface CustomerHomeProps {
   onBook: (booking: Booking) => void;

@@ -38,3 +38,27 @@ exports.sendNewBookingNotification = functions.firestore
     return null;
   }
 });
+
+exports.testPush = functions.https.onRequest(async (req, res) => {
+  const token = req.query.token;
+
+  if (!token) {
+    return res.status(400).send("Token missing");
+  }
+
+  const message = {
+    token: token,
+    notification: {
+      title: "Test Notification",
+      body: "Push notification working 🎉",
+    },
+  };
+
+  try {
+    await admin.messaging().send(message);
+    res.send("Notification sent successfully");
+  } catch (error) {
+    console.error("Push error:", error);
+    res.status(500).send("Push failed");
+  }
+});

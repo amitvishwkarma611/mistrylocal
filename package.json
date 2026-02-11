@@ -21,6 +21,7 @@
   "devDependencies": {
     "@resvg/resvg-js": "^2.6.2",
     "@types/node": "^22.14.0",
+    "@vercel/node": "^5.6.2",
     "@vitejs/plugin-react": "^5.1.2",
     "autoprefixer": "^10.4.20",
     "pngjs": "^7.0.0",

@@ -19,7 +19,27 @@ const db = getFirestore(app);
 
 export default async function handler(req, res) {
   try {
-    const { pincode, service } = req.body;
+    const { token, title, body, pincode, service } = req.body;
+
+    // ===== MODE 1: DIRECT TOKEN TEST =====
+    if (token) {
+      await getMessaging().send({
+        token,
+        notification: {
+          title: title || "Test Notification",
+          body: body || "Push working 🎉",
+        },
+      });
+
+      return res.json({ success: true, mode: "single-token" });
+    }
+
+    // ===== MODE 2: BOOKING BASED PUSH =====
+    if (!pincode || !service) {
+      return res.status(400).json({
+        error: "Missing pincode or service",
+      });
+    }
 
     const snapshot = await db
       .collection("carpenters")
@@ -27,7 +47,7 @@ export default async function handler(req, res) {
       .where("serviceAreas", "array-contains", pincode)
       .get();
 
-    const tokens: string[] = [];
+    const tokens = [];
 
     snapshot.forEach((doc) => {
       const data = doc.data();
@@ -46,11 +66,11 @@ export default async function handler(req, res) {
       },
     });
 
-    return res.json({ success: true, sent: tokens.length });
+    return res.json({ success: true, sent: tokens.length, mode: "multicast" });
   } catch (err: any) {
     console.error("🔥 PUSH REAL ERROR:", err);
 
-    res.status(500).json({
+    return res.status(500).json({
       error: "Push failed",
       message: err?.message || null,
       code: err?.code || null,

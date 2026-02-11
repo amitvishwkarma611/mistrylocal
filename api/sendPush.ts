@@ -3,35 +3,57 @@
 // FIREBASE_CLIENT_EMAIL
 // FIREBASE_PRIVATE_KEY
 
-import type { VercelRequest, VercelResponse } from '@vercel/node'
-import admin from 'firebase-admin'
+import { initializeApp, cert } from "firebase-admin/app";
+import { getFirestore } from "firebase-admin/firestore";
+import { getMessaging } from "firebase-admin/messaging";
 
-if (!admin.apps.length) {
-  admin.initializeApp({
-    credential: admin.credential.cert({
-      projectId: process.env.FIREBASE_PROJECT_ID,
-      clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-      privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, '\n'),
-    }),
-  })
-}
+const app = initializeApp({
+  credential: cert({
+    projectId: process.env.FIREBASE_PROJECT_ID,
+    clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+    privateKey: process.env.FIREBASE_PRIVATE_KEY?.replace(/\\n/g, "\n"),
+  }),
+});
 
-export default async function handler(req: VercelRequest, res: VercelResponse) {
+const db = getFirestore(app);
+
+export default async function handler(req, res) {
   try {
-    const { token, title, body } = req.body
+    const { pincode, service } = req.body;
 
-    if (!token) {
-      return res.status(400).json({ error: 'Token required' })
+    const snapshot = await db
+      .collection("carpenters")
+      .where("online", "==", true)
+      .where("serviceAreas", "array-contains", pincode)
+      .get();
+
+    const tokens: string[] = [];
+
+    snapshot.forEach((doc) => {
+      const data = doc.data();
+      if (data.fcmToken) tokens.push(data.fcmToken);
+    });
+
+    if (tokens.length === 0) {
+      return res.json({ success: false, message: "No carpenters online" });
     }
 
-    await admin.messaging().send({
-      token,
-      notification: { title, body },
-    })
+    await getMessaging().sendEachForMulticast({
+      tokens,
+      notification: {
+        title: "New Job Nearby 🔧",
+        body: `${service} job available. Open MistryLocal.`,
+      },
+    });
 
-    return res.status(200).json({ success: true })
-  } catch (error) {
-    console.error('Push error:', error)
-    return res.status(500).json({ error: 'Push failed' })
+    return res.json({ success: true, sent: tokens.length });
+  } catch (err: any) {
+    console.error("🔥 PUSH REAL ERROR:", err);
+
+    res.status(500).json({
+      error: "Push failed",
+      message: err?.message || null,
+      code: err?.code || null,
+    });
   }
 }

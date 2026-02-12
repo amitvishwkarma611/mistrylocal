@@ -25,9 +25,17 @@ export default async function handler(req, res) {
     if (token) {
       await getMessaging().send({
         token,
+
         notification: {
-          title: title || "Test Notification",
-          body: body || "Push working 🎉",
+          title: title || "New Job",
+          body: body || "Tap to open app",
+        },
+
+        webpush: {
+          notification: {
+            icon: "/icons/icon-192.png",
+            badge: "/icons/icon-192.png",
+          },
         },
       });
 
@@ -63,6 +71,12 @@ export default async function handler(req, res) {
       notification: {
         title: "New Job Nearby 🔧",
         body: `${service} job available. Open MistryLocal.`,
+      },
+      webpush: {
+        notification: {
+          icon: "/icons/icon-192.png",
+          badge: "/icons/icon-192.png",
+        },
       },
     });
 

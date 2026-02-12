@@ -1,4 +1,3 @@
-
 /**
  * Firebase Configuration and Initialization
  * 
@@ -70,17 +69,17 @@ export const generateFCMToken = async (userId?: string, collectionName: string =
     console.warn('Messaging not initialized');
     return null;
   }
-  
+
   try {
     console.log('🔄 Requesting notification permission...');
     const permission = await Notification.requestPermission();
     console.log('Permission status:', permission);
-    
+
     if (permission !== 'granted') {
       console.warn('Notification permission denied');
       return null;
     }
-    
+
     // Delete the current token to force generation of a new one
     try {
       await deleteToken(messaging); // This forces token refresh
@@ -88,16 +87,16 @@ export const generateFCMToken = async (userId?: string, collectionName: string =
     } catch (deleteError) {
       console.log('ℹ️ No existing token to delete, proceeding with new token generation');
     }
-    
+
     console.log('🔄 Getting FCM token with VAPID key...');
     const token = await getToken(messaging, {
       vapidKey: 'BJyj641GcztGJRfxOxODv9NipObdddA8qPp-PkTmqIRkdNhSb9UdWCE_zmsc2C-4l_7rUEX5qNnkjT79DprCiIA'
     });
-    
+
     if (token) {
       console.log('✅ FCM Token generated successfully:', token);
       localStorage.setItem('fcm_token', token);
-      
+
       // Save the token to Firestore if userId is provided
       if (userId) {
         try {
@@ -116,7 +115,7 @@ export const generateFCMToken = async (userId?: string, collectionName: string =
           }
         }
       }
-      
+
       return token;
     } else {
       console.warn('No token received from FCM');
@@ -159,26 +158,26 @@ export const listenForegroundNotifications = () => {
     console.warn('Messaging not initialized, cannot listen for foreground notifications');
     return;
   }
-  
+
   console.log('🔄 Setting up foreground notification listener...');
-  
+
   onMessage(messaging, (payload) => {
-    console.log('🔔 Foreground notification received:', payload);
-    
-    // Show browser notification
-    if (payload.notification) {
-      console.log('Showing notification:', payload.notification.title);
-      new Notification(payload.notification.title || 'New Notification', {
-        body: payload.notification.body || '',
-        icon: '/icons/icon-192x192.png',
-        badge: '/icons/icon-192x192.png',
-        tag: 'mistry-foreground-notification'
-      });
+    console.log("📩 Foreground message received:", payload);
+
+    const title = payload?.notification?.title || "New Job";
+    const options = {
+      body: payload?.notification?.body || "Tap to open",
+      icon: "/icons/icon-192.png",
+    };
+
+    // Show browser notification manually
+    if (Notification.permission === "granted") {
+      new Notification(title, options);
     }
-    
+
     // Also dispatch custom event for app to handle
-    const event = new CustomEvent('foregroundNotification', { 
-      detail: payload 
+    const event = new CustomEvent('foregroundNotification', {
+      detail: payload
     });
     window.dispatchEvent(event);
   });

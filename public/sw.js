@@ -1,17 +1,3 @@
-importScripts("https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js");
-importScripts("https://www.gstatic.com/firebasejs/9.23.0/firebase-messaging-compat.js");
-
-firebase.initializeApp({
-  apiKey: "AIzaSyBos6sD7W3y8EHvcDSYnvu7TehIgaw4ka8",
-  authDomain: "mistrylocal.firebaseapp.com",
-  projectId: "mistrylocal",
-  storageBucket: "mistrylocal.firebasestorage.app",
-  messagingSenderId: "994770518651",
-  appId: "1:994770518651:web:426413c55474680eee58de",
-});
-
-const messaging = firebase.messaging();
-
 const CACHE_NAME = 'mistrylocal-v6';
 const urlsToCache = [
   '/',
@@ -146,19 +132,4 @@ self.addEventListener('notificationclick', (event) => {
       }
     })
   );
-});
-
-// Firebase messaging background handler
-messaging.onBackgroundMessage(function (payload) {
-  console.log("📩 Background message received:", payload);
-
-  const title = payload?.notification?.title || "New Job";
-  const options = {
-    body: payload?.notification?.body || "Tap to view details",
-    icon: "/icons/icon-192.png",
-    badge: "/icons/icon-192.png",
-    data: payload?.data || {},
-  };
-
-  self.registration.showNotification(title, options);
 });

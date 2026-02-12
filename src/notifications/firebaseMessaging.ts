@@ -1,4 +1,4 @@
-import { getMessaging, getToken, onMessage, isSupported } from 'firebase/messaging';
+import { getMessaging, getToken, onMessage, isSupported, deleteToken } from 'firebase/messaging';
 import { initializeApp } from 'firebase/app';
 
 const firebaseConfig = {
@@ -14,7 +14,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const messaging = isSupported().then(supported => supported ? getMessaging(app) : null);
 
-export const getWorkerFCMToken = async (): Promise<string | null> => {
+export const getWorkerFCMToken = async (forceRefresh: boolean = false): Promise<string | null> => {
   try {
     const msg = await messaging;
     if (!msg) return null;
@@ -22,12 +22,30 @@ export const getWorkerFCMToken = async (): Promise<string | null> => {
     const permission = await Notification.requestPermission();
     if (permission !== 'granted') return null;
     
-    const vapidKey = 'BKPxQFVLQr3vX-iG8vNjU7NfaDsgzWtm2e3rJPFOnac_6PNJz5azLA2cvxdo9cX09-4RUtIT2C6vwR_8mcHvBzU';
-    const token = await getToken(msg, { vapidKey });
+    let token = null;
+    
+    if (forceRefresh) {
+      try {
+        await deleteToken(msg); // Force delete the current token
+        console.log('🗑️ Old worker FCM token deleted, forcing new token generation');
+      } catch (deleteError) {
+        console.log('ℹ️ No existing worker token to delete');
+      }
+    }
+    
+    const vapidKey = 'BJyj641GcztGJRfxOxODv9NipObdddA8qPp-PkTmqIRkdNhSb9UdWCE_zmsc2C-4l_7rUEX5qNnkjT79DprCiIA';
+    token = await getToken(msg, { vapidKey });
     return token || null;
-  } catch (error) {
+  } catch (error: any) {
+    if (error.code === 'messaging/registration-token-not-registered') {
+      console.warn("Worker FCM token not registered:", error);
+    }
     return null;
   }
+};
+
+export const forceRefreshWorkerFCMToken = async (): Promise<string | null> => {
+  return await getWorkerFCMToken(true);
 };
 
 export const listenForegroundNotifications = (callback: (payload: any) => void) => {

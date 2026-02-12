@@ -20,7 +20,7 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, signInWithPhoneNumber, RecaptchaVerifier, onAuthStateChanged, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword, EmailAuthProvider } from "firebase/auth";
 import { getFirestore, doc, getDoc, setDoc, serverTimestamp, collection, query, orderBy, limit, addDoc, updateDoc } from "firebase/firestore";
-import { getMessaging, getToken, onMessage } from "firebase/messaging";
+import { getMessaging, getToken, onMessage, deleteToken } from "firebase/messaging";
 
 // Replace with your actual Firebase Project config
 const firebaseConfig = {
@@ -65,7 +65,7 @@ export {
   updateDoc
 };
 
-export const generateFCMToken = async (): Promise<string | null> => {
+export const generateFCMToken = async (userId?: string, collectionName: string = "carpenters"): Promise<string | null> => {
   if (!messaging) {
     console.warn('Messaging not initialized');
     return null;
@@ -81,23 +81,75 @@ export const generateFCMToken = async (): Promise<string | null> => {
       return null;
     }
     
+    // Delete the current token to force generation of a new one
+    try {
+      await deleteToken(messaging); // This forces token refresh
+      console.log('🗑️ Old FCM token deleted, forcing new token generation');
+    } catch (deleteError) {
+      console.log('ℹ️ No existing token to delete, proceeding with new token generation');
+    }
+    
     console.log('🔄 Getting FCM token with VAPID key...');
     const token = await getToken(messaging, {
-      vapidKey: 'BKPxQFVLQr3vX-iG8vNjU7NfaDsgzWtm2e3rJPFOnac_6PNJz5azLA2cvxdo9cX09-4RUtIT2C6vwR_8mcHvBzU'
+      vapidKey: 'BJyj641GcztGJRfxOxODv9NipObdddA8qPp-PkTmqIRkdNhSb9UdWCE_zmsc2C-4l_7rUEX5qNnkjT79DprCiIA'
     });
     
     if (token) {
       console.log('✅ FCM Token generated successfully:', token);
       localStorage.setItem('fcm_token', token);
+      
+      // Save the token to Firestore if userId is provided
+      if (userId) {
+        try {
+          await updateDoc(doc(db, collectionName, userId), {
+            fcmToken: token,
+          });
+          console.log(`✅ FCM token saved for ${collectionName}/${userId}`);
+        } catch (dbError: any) {
+          if (dbError.code === 'messaging/registration-token-not-registered') {
+            console.warn("FCM token not registered, clearing invalid token:", dbError);
+            await updateDoc(doc(db, collectionName, userId), {
+              fcmToken: null,
+            });
+          } else {
+            console.error('Failed to save FCM token to Firestore:', dbError);
+          }
+        }
+      }
+      
       return token;
     } else {
       console.warn('No token received from FCM');
       return null;
     }
   } catch (error: any) {
-    console.error('❌ Error generating FCM token:', error);
-    console.error('Error code:', error?.code);
-    console.error('Error message:', error?.message);
+    if (error.code === 'messaging/registration-token-not-registered') {
+      console.warn("FCM token not registered:", error);
+    } else {
+      console.error('❌ Error generating FCM token:', error);
+      console.error('Error code:', error?.code);
+      console.error('Error message:', error?.message);
+    }
+    return null;
+  }
+};
+
+// Function to delete the current token and force regeneration
+export const forceRefreshFCMToken = async (): Promise<string | null> => {
+  if (!messaging) {
+    console.warn('Messaging not initialized');
+    return null;
+  }
+
+  try {
+    // Delete the current token to force a new one
+    await deleteToken(messaging);
+    console.log('🗑️ Current FCM token deleted');
+
+    // Generate a new token
+    return await generateFCMToken();
+  } catch (error: any) {
+    console.error('❌ Error forcing FCM token refresh:', error);
     return null;
   }
 };

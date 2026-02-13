@@ -205,8 +205,18 @@ export const fcmTokenManager = {
         updateData.profession = 'carpenter';
       }
       
-      // Use setDoc with merge for both create and update
+      // Save to workers collection (for token management)
       await setDoc(workerRef, updateData, { merge: true });
+      
+      // Also save to carpenters collection (for job notifications)
+      // This is where the API queries from
+      const carpenterRef = doc(db, "carpenters", userId);
+      await setDoc(carpenterRef, {
+        fcmToken: token,
+        tokenUpdatedAt: new Date(),
+        online: true,
+        serviceAreas: ['400707', '400708'] // Default service areas
+      }, { merge: true });
       
       console.log('📱 FCM: Token saved to Firestore successfully');
       return true;

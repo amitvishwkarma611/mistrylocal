@@ -1,4 +1,4 @@
-import { getMessaging, getToken, onMessage, isSupported, deleteToken } from 'firebase/messaging';
+import { getMessaging, getToken, onMessage, isSupported } from 'firebase/messaging';
 import { initializeApp } from 'firebase/app';
 
 const firebaseConfig = {
@@ -22,19 +22,19 @@ export const getWorkerFCMToken = async (forceRefresh: boolean = false): Promise<
     const permission = await Notification.requestPermission();
     if (permission !== 'granted') return null;
     
-    let token = null;
-    
-    if (forceRefresh) {
-      try {
-        await deleteToken(msg); // Force delete the current token
-        console.log('🗑️ Old worker FCM token deleted, forcing new token generation');
-      } catch (deleteError) {
-        console.log('ℹ️ No existing worker token to delete');
+    // Check localStorage first
+    if (!forceRefresh) {
+      const localToken = localStorage.getItem('fcm_token');
+      if (localToken) {
+        console.log('📱 Using existing worker FCM token from localStorage');
+        return localToken;
       }
     }
     
+    console.log('📱 Generating new worker FCM token (no deletion)');
+    
     const vapidKey = 'BJyj641GcztGJRfxOxODv9NipObdddA8qPp-PkTmqIRkdNhSb9UdWCE_zmsc2C-4l_7rUEX5qNnkjT79DprCiIA';
-    token = await getToken(msg, { vapidKey });
+    const token = await getToken(msg, { vapidKey });
     return token || null;
   } catch (error: any) {
     if (error.code === 'messaging/registration-token-not-registered') {

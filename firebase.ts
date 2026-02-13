@@ -19,7 +19,7 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, signInWithPhoneNumber, RecaptchaVerifier, onAuthStateChanged, signOut, signInWithEmailAndPassword, createUserWithEmailAndPassword, EmailAuthProvider } from "firebase/auth";
 import { getFirestore, doc, getDoc, setDoc, serverTimestamp, collection, query, orderBy, limit, addDoc, updateDoc } from "firebase/firestore";
-import { getMessaging, getToken, onMessage, deleteToken } from "firebase/messaging";
+import { getMessaging, getToken, onMessage, isSupported } from "firebase/messaging";
 
 // Replace with your actual Firebase Project config
 const firebaseConfig = {
@@ -80,14 +80,14 @@ export const generateFCMToken = async (userId?: string, collectionName: string =
       return null;
     }
 
-    // Delete the current token to force generation of a new one
-    try {
-      await deleteToken(messaging); // This forces token refresh
-      console.log('🗑️ Old FCM token deleted, forcing new token generation');
-    } catch (deleteError) {
-      console.log('ℹ️ No existing token to delete, proceeding with new token generation');
+    // Check for existing valid token first (never delete tokens)
+    const localToken = localStorage.getItem('fcm_token');
+    if (localToken) {
+      console.log('✅ Using existing FCM token from localStorage');
+      return localToken;
     }
 
+    // Only generate new token if none exists
     console.log('🔄 Getting FCM token with VAPID key...');
     const token = await getToken(messaging, {
       vapidKey: 'BJyj641GcztGJRfxOxODv9NipObdddA8qPp-PkTmqIRkdNhSb9UdWCE_zmsc2C-4l_7rUEX5qNnkjT79DprCiIA'
@@ -133,7 +133,7 @@ export const generateFCMToken = async (userId?: string, collectionName: string =
   }
 };
 
-// Function to delete the current token and force regeneration
+// Function to refresh token (without deleting old one)
 export const forceRefreshFCMToken = async (): Promise<string | null> => {
   if (!messaging) {
     console.warn('Messaging not initialized');
@@ -141,9 +141,9 @@ export const forceRefreshFCMToken = async (): Promise<string | null> => {
   }
 
   try {
-    // Delete the current token to force a new one
-    await deleteToken(messaging);
-    console.log('🗑️ Current FCM token deleted');
+    // Clear local token cache to force new token generation
+    localStorage.removeItem('fcm_token');
+    console.log('🔄 Local token cache cleared, generating new token');
 
     // Generate a new token
     return await generateFCMToken();

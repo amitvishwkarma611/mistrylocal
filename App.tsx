@@ -185,6 +185,34 @@ const App: React.FC = () => {
     };
   }, []);
   
+  // Periodic FCM token validation for workers
+  useEffect(() => {
+    if (!user || user.role !== AppRole.CARPENTER) return;
+    
+    let validationInterval: NodeJS.Timeout;
+    
+    const validateTokenPeriodically = async () => {
+      try {
+        const { fcmTokenManager } = await import('./src/services/fcmTokenManager');
+        await fcmTokenManager.getToken(user.uid);
+      } catch (error) {
+        console.error('❌ Periodic token validation failed:', error);
+      }
+    };
+    
+    // Validate token immediately on login
+    validateTokenPeriodically();
+    
+    // Set up periodic validation (every 6 hours)
+    validationInterval = setInterval(validateTokenPeriodically, 6 * 60 * 60 * 1000);
+    
+    return () => {
+      if (validationInterval) {
+        clearInterval(validationInterval);
+      }
+    };
+  }, [user]);
+  
   // Fetch carpenter profile for carpenter users
   useEffect(() => {
     const fetchCarpenterProfile = async () => {

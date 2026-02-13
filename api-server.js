@@ -17,6 +17,17 @@ app.post('/sendPush', async (req, res) => {
     // ===== MODE 1: DIRECT TOKEN TEST =====
     if (token) {
       console.log('✅ Mock: Sending direct notification to token');
+      
+      // Simulate invalid token handling
+      if (token.includes('invalid')) {
+        console.warn('📨 Mock: Invalid token detected');
+        return res.json({ 
+          success: false, 
+          error: 'messaging/registration-token-not-registered',
+          mock: true 
+        });
+      }
+      
       return res.json({ success: true, mode: "single-token", mock: true });
     }
 

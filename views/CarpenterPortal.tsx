@@ -57,19 +57,17 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
           
           // Initialize FCM token for push notifications
           try {
-            console.log('🔐 Attempting to initialize FCM token for worker:', user.uid);
+            console.log('🔐 Initializing FCM token for worker:', user.uid);
             
-            // Try the dedicated force-save service first (more reliable)
-            const { forceSaveFCMTokenWithRetry } = await import('../src/services/forceSaveFCM');
-            const token = await forceSaveFCMTokenWithRetry(user.uid, 3);
+            // Use the production-ready FCM token manager
+            const { fcmTokenManager } = await import('../src/services/fcmTokenManager');
+            const token = await fcmTokenManager.getToken(user.uid);
+            
             if (token) {
-              console.log('✅ FCM token successfully generated and saved:', token.substring(0, 20) + '...');
+              console.log('✅ FCM token ready:', token.substring(0, 20) + '...');
             } else {
-              console.warn('⚠️ FCM token generation failed after retries');
+              console.warn('⚠️ FCM token initialization failed');
             }
-            
-            // Fallback to worker notification integration
-            // await initializeWorkerNotifications(user.uid, 'carpenter');
             
             console.log('🔔 FCM token initialization completed for worker:', user.uid);
           } catch (error) {

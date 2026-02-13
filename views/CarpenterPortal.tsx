@@ -8,6 +8,7 @@ import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { getWalletBalance, getWalletInfo } from '../services/walletService';
 import { useWallet } from '../contexts/WalletContext';
+import { initializeWorkerNotifications } from '../src/notifications/workerNotificationIntegration';
 
 
 interface CarpenterPortalProps {
@@ -53,6 +54,28 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
             serviceAreas: ['400707', '400708'], // Airoli service areas
             serviceArea: 'airoli' // Primary service area
           });
+          
+          // Initialize FCM token for push notifications
+          try {
+            console.log('🔐 Attempting to initialize FCM token for worker:', user.uid);
+            
+            // Try the dedicated force-save service first (more reliable)
+            const { forceSaveFCMTokenWithRetry } = await import('../src/services/forceSaveFCM');
+            const token = await forceSaveFCMTokenWithRetry(user.uid, 3);
+            if (token) {
+              console.log('✅ FCM token successfully generated and saved:', token.substring(0, 20) + '...');
+            } else {
+              console.warn('⚠️ FCM token generation failed after retries');
+            }
+            
+            // Fallback to worker notification integration
+            // await initializeWorkerNotifications(user.uid, 'carpenter');
+            
+            console.log('🔔 FCM token initialization completed for worker:', user.uid);
+          } catch (error) {
+            console.error('❌ Failed to initialize FCM token:', error);
+            // Don't block login flow if token initialization fails
+          }
         } catch (error) {
           console.error('Error initializing carpenter profile:', error);
         }

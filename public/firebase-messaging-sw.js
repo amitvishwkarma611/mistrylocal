@@ -16,10 +16,12 @@ const messaging = firebase.messaging();
 
 // 🔔 Background push receive
 messaging.onBackgroundMessage((payload) => {
-  console.log("SW payload:", payload);
+  console.log("🔔 SW background payload received:", payload);
 
   self.registration.showNotification(payload.notification.title, {
     body: payload.notification.body,
-    icon: "/icon-192.png"
+    icon: "/icons/icon-192.png",
+    badge: "/icons/icon-192.png",
+    data: payload.data || {}
   });
 });

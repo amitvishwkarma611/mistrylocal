@@ -14,7 +14,7 @@ service cloud.firestore {
     }
 
     function isValidProfession() {
-      return resource.data.profession in ['carpenter', 'plumber', 'electrician'];
+      return request.resource.data.profession in ['carpenter', 'plumber', 'electrician'];
     }
 
     // =========================
@@ -85,9 +85,7 @@ service cloud.firestore {
       allow create: if isOwner(workerId) && isValidProfession();
       
       // Update rules that allow changes but maintain ownership
-      allow update: if isOwner(workerId)
-        // Prevent changing the profession after creation
-        && (!('profession' in request.resource.data) || resource.data.profession == request.resource.data.profession);
+      allow update: if isOwner(workerId);
 
       // No wallet balance field in this collection - using dedicated wallet collections instead
     }

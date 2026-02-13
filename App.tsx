@@ -18,6 +18,7 @@ import { subscribeToUserBookings, updateBookingStatus as updateBookingStatusFire
 import { applyMinimumPrice } from './services/priceService';
 import { auth } from './firebase'; // Import auth
 import { onAuthStateChanged } from 'firebase/auth'; // Import onAuthStateChanged
+import { getMessaging, onMessage } from 'firebase/messaging'; // Add messaging imports
 
 // Extend Window interface to include our custom properties
 declare global {
@@ -149,6 +150,39 @@ const App: React.FC = () => {
 
     // Cleanup subscription on unmount
     return () => unsubscribe();
+  }, []);
+  
+  // Setup foreground push notifications
+  useEffect(() => {
+    let unsubscribe: (() => void) | null = null;
+    
+    const setupForegroundNotifications = async () => {
+      try {
+        const { getMessaging, onMessage } = await import('firebase/messaging');
+        const messaging = getMessaging();
+        
+        unsubscribe = onMessage(messaging, (payload) => {
+          console.log('🔔 Foreground message received:', payload);
+          // Show browser notification
+          if (Notification.permission === 'granted') {
+            new Notification(payload.notification?.title || 'New Job', {
+              body: payload.notification?.body || 'Tap to open app',
+              icon: '/icons/icon-192.png'
+            });
+          }
+        });
+      } catch (error) {
+        console.error('❌ Failed to setup foreground notifications:', error);
+      }
+    };
+    
+    setupForegroundNotifications();
+    
+    return () => {
+      if (unsubscribe) {
+        unsubscribe();
+      }
+    };
   }, []);
   
   // Fetch carpenter profile for carpenter users

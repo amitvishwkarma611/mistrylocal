@@ -313,8 +313,8 @@ export const createBookingWithDistribution = async (
     // TRIGGER PUSH NOTIFICATIONS FOR WORKERS
     try {
       const { triggerBookingPush } = await import('./pushBooking');
-      await triggerBookingPush(bookingData.pincode, bookingData.furnitureType);
-      console.log('🔔 Push notification triggered for pincode:', bookingData.pincode);
+      await triggerBookingPush(bookingData.pincode, bookingData.furnitureType, bookingId);
+      console.log('🔔 Push notification triggered for pincode:', bookingData.pincode, 'booking:', bookingId);
     } catch (pushError) {
       console.error('❌ Failed to trigger push notifications:', pushError);
     }

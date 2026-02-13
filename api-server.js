@@ -39,12 +39,14 @@ app.post('/sendPush', async (req, res) => {
     }
 
     console.log(`✅ Mock: Would send notifications for ${service} jobs in pincode ${pincode}`);
+    console.log(`📋 Booking details:`, { pincode, service, bookingId, action: 'view_jobs' });
     return res.json({ 
       success: true, 
       sent: 3, 
       mode: "multicast", 
       mock: true,
-      message: "Mock notification sent - in production this would send real push notifications"
+      message: "Mock notification sent - in production this would send real push notifications",
+      notificationData: { pincode, service, bookingId, action: 'view_jobs', tab: 'jobs' }
     });
   } catch (err) {
     console.error("❌ Mock PUSH ERROR:", err);

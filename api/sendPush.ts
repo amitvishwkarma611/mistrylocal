@@ -49,6 +49,9 @@ export default async function handler(req, res) {
       });
     }
 
+    // Extract booking ID if provided
+    const bookingId = req.body.bookingId || null;
+
     const snapshot = await db
       .collection("carpenters")
       .where("online", "==", true)
@@ -77,6 +80,13 @@ export default async function handler(req, res) {
           icon: "/icons/icon-192.png",
           badge: "/icons/icon-192.png",
         },
+        data: {
+          bookingId: bookingId || '',
+          pincode,
+          service,
+          action: 'view_jobs',
+          tab: 'jobs'
+        }
       },
     });
 

@@ -23,7 +23,8 @@ import { getMessaging, onMessage } from 'firebase/messaging'; // Add messaging i
 // Extend Window interface to include our custom properties
 declare global {
   interface Window {
-    // Removed _bookingUpdateTimeouts - no longer needed with direct updates
+    // Handle notification click data
+    notificationData?: any;
   }
 }
 
@@ -181,6 +182,56 @@ const App: React.FC = () => {
     return () => {
       if (unsubscribe) {
         unsubscribe();
+      }
+    };
+  }, []);
+  
+  // Handle notification click from service worker
+  useEffect(() => {
+    // Listen for messages from service worker
+    const handleNotificationClick = (event: MessageEvent) => {
+      console.log('📬 App received message from SW:', event.data);
+      
+      if (event.data && event.data.type === 'NOTIFICATION_CLICKED') {
+        const data = event.data.data;
+        console.log('📬 Notification clicked with data:', data);
+        
+        // Store the notification data for the app to use
+        window.notificationData = data;
+        
+        // If there's a booking ID, trigger a refresh
+        if (data?.bookingId) {
+          window.dispatchEvent(new CustomEvent('refreshBookings'));
+        }
+        
+        // If user should navigate to specific tab
+        if (data?.tab) {
+          window.dispatchEvent(new CustomEvent('switchTab', { detail: data.tab }));
+        }
+      }
+    };
+    
+    // Add event listener for service worker messages
+    if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+      navigator.serviceWorker.addEventListener('message', handleNotificationClick);
+    }
+    
+    // Check if app was opened from notification (URL params)
+    const urlParams = new URLSearchParams(window.location.search);
+    const notificationData = urlParams.get('notification_data');
+    if (notificationData) {
+      try {
+        const parsed = JSON.parse(decodeURIComponent(notificationData));
+        window.notificationData = parsed;
+        console.log('📬 App opened from notification:', parsed);
+      } catch (e) {
+        console.error('Failed to parse notification data:', e);
+      }
+    }
+    
+    return () => {
+      if (typeof window !== 'undefined' && 'serviceWorker' in navigator) {
+        navigator.serviceWorker.removeEventListener('message', handleNotificationClick);
       }
     };
   }, []);

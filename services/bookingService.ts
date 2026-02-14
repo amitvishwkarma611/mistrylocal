@@ -19,6 +19,124 @@ import { getProfessionCollection, getWorkerProfessionSafe } from './professionSe
 import { recalculateTrustScore } from './trustScoreService';
 import { getWalletBalance, deductLeadCharge } from './walletService';
 
+// ========================================
+// AUTO-CANCEL ON APP EXIT TRACKING
+// ========================================
+// Track the current in-progress booking for auto-cancel
+let currentInProgressBooking: { id: string; customerId: string; createdAt: number } | null = null;
+let autoCancelCleanupRegistered = false;
+
+/**
+ * Track a booking as in-progress for auto-cancel on app exit
+ */
+export const trackInProgressBooking = (bookingId: string, customerId: string): void => {
+  currentInProgressBooking = {
+    id: bookingId,
+    customerId,
+    createdAt: Date.now()
+  };
+  
+  // Register cleanup handlers if not already done
+  if (!autoCancelCleanupRegistered && typeof window !== 'undefined') {
+    autoCancelCleanupRegistered = true;
+    
+    // Handle page unload (closing tab, navigating away)
+    window.addEventListener('beforeunload', handleAppExit);
+    
+    // Handle visibility change (switching apps, minimizing)
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+  }
+  
+  console.log('📱 Tracking in-progress booking:', bookingId);
+};
+
+/**
+ * Clear tracked booking (when booking is completed or canceled)
+ */
+export const clearInProgressBooking = (): void => {
+  currentInProgressBooking = null;
+  console.log('📱 Cleared in-progress booking tracking');
+};
+
+/**
+ * Handle when user closes or leaves the app
+ */
+const handleAppExit = async (): Promise<void> => {
+  if (currentInProgressBooking) {
+    console.log('📱 App exiting, auto-canceling booking:', currentInProgressBooking.id);
+    
+    // Use sendBeacon for more reliable delivery during page unload
+    const data = JSON.stringify({
+      bookingId: currentInProgressBooking.id,
+      customerId: currentInProgressBooking.customerId,
+      reason: 'app_exit',
+      timestamp: Date.now()
+    });
+    
+    // Try to send cancel request
+    navigator.sendBeacon?.('/api/autoCancelBooking', data);
+    
+    // Also try async cancel
+    try {
+      await autoCancelIncompleteBooking(currentInProgressBooking.id, currentInProgressBooking.customerId);
+    } catch (e) {
+      // Ignore errors during unload
+    }
+  }
+};
+
+/**
+ * Handle visibility change (user switches apps)
+ */
+const handleVisibilityChange = async (): Promise<void> => {
+  // If page becomes hidden and has been hidden for more than 30 seconds, cancel
+  if (document.hidden && currentInProgressBooking) {
+    const hiddenTime = Date.now() - currentInProgressBooking.createdAt;
+    
+    // Only auto-cancel if booking was created more than 30 seconds ago
+    if (hiddenTime > 30000) {
+      console.log('📱 App hidden for 30s+, auto-canceling booking:', currentInProgressBooking.id);
+      
+      await autoCancelIncompleteBooking(currentInProgressBooking.id, currentInProgressBooking.customerId);
+      currentInProgressBooking = null;
+    }
+  }
+};
+
+/**
+ * Auto-cancel an incomplete booking
+ */
+export const autoCancelIncompleteBooking = async (bookingId: string, customerId: string): Promise<boolean> => {
+  try {
+    const bookingRef = doc(db, 'bookings', bookingId);
+    const bookingSnap = await getDoc(bookingRef);
+    
+    if (!bookingSnap.exists()) {
+      return false;
+    }
+    
+    const bookingData = bookingSnap.data();
+    
+    // Only cancel if booking is still in SEARCHING or PENDING status
+    if (bookingData.status === JobStatus.SEARCHING || bookingData.status === JobStatus.PENDING) {
+      await updateDoc(bookingRef, {
+        status: JobStatus.CANCELLED,
+        cancelledAt: serverTimestamp(),
+        cancelReason: 'auto_cancel_app_exit',
+        cancelledBy: customerId
+      });
+      
+      console.log('✅ Auto-canceled booking:', bookingId);
+      return true;
+    }
+    
+    return false;
+  } catch (error) {
+    console.error('❌ Auto-cancel failed:', error);
+    return false;
+  }
+};
+
 // GLOBAL WRITE OPERATION TRACKING
 // Prevent excessive write operations that could cause quota exhaustion
 const activeWriteOperations = new Set<string>();
@@ -313,10 +431,21 @@ export const createBookingWithDistribution = async (
     // TRIGGER PUSH NOTIFICATIONS FOR WORKERS
     try {
       const { triggerBookingPush } = await import('./pushBooking');
-      await triggerBookingPush(bookingData.pincode, bookingData.furnitureType, bookingId);
+      await triggerBookingPush(
+        bookingData.pincode, 
+        bookingData.furnitureType, 
+        bookingId,
+        (bookingData as any).customerName,
+        (bookingData as any).address
+      );
       console.log('🔔 Push notification triggered for pincode:', bookingData.pincode, 'booking:', bookingId);
     } catch (pushError) {
       console.error('❌ Failed to trigger push notifications:', pushError);
+    }
+    
+    // Track booking for auto-cancel on app exit
+    if (bookingData.customerId) {
+      trackInProgressBooking(bookingId, bookingData.customerId);
     }
     
     return bookingId;
@@ -506,6 +635,10 @@ export const acceptJob = async (
       
       // Update local tracking
       carpenterActiveJobs.set(carpenterId, bookingId);
+      
+      // Clear in-progress booking tracking since job is now accepted
+      clearInProgressBooking();
+      
       if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
         console.log(`✅ Job ${bookingId} accepted by carpenter ${carpenterId}`);
       }
@@ -1191,6 +1324,9 @@ export const updateBookingStatus = async (bookingId: string, status: JobStatus):
       
       // Release carpenter job if booking is completed or cancelled
       if (status === JobStatus.COMPLETED || status === JobStatus.CANCELLED) {
+        // Clear in-progress booking tracking
+        clearInProgressBooking();
+        
         // Get the booking to find the assigned carpenter
         const bookingSnapshot = await getDoc(bookingRef);
         if (bookingSnapshot.exists()) {
@@ -1250,6 +1386,9 @@ export const cancelBooking = async (bookingId: string): Promise<void> => {
         status: JobStatus.CANCELLED,
         updatedAt: serverTimestamp()
       });
+      
+      // Clear in-progress booking tracking
+      clearInProgressBooking();
       
       console.log(`Booking ${bookingId} cancelled successfully`);
     } catch (error) {

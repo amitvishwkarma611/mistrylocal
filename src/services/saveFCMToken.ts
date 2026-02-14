@@ -1,5 +1,5 @@
 import { doc, updateDoc } from "firebase/firestore";
-import { db } from "../firebase";
+import { db } from "../../firebase";
 import { getMessaging, getToken } from "firebase/messaging";
 
 export const saveFCMTokenToFirestore = async (userId: string) => {
@@ -7,7 +7,7 @@ export const saveFCMTokenToFirestore = async (userId: string) => {
     const messaging = getMessaging();
 
     const token = await getToken(messaging, {
-      vapidKey: import.meta.env.VITE_FIREBASE_VAPID_KEY,
+      vapidKey: 'BJyj641GcztGJRfxOxODv9NipObdddA8qPp-PkTmqIRkdNhSb9UdWCE_zmsc2C-4l_7rUEX5qNnkjT79DprCiIA',
     });
 
     if (!token) {

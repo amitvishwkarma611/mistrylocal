@@ -231,6 +231,34 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
       b.status === JobStatus.CANCELLED
     );
     
+    // Check for verification code updates in existing accepted bookings
+    const verificationCodeUpdatedBookings = bookings.filter(currentBooking => {
+      if (currentBooking.status === JobStatus.ACCEPTED && currentBooking.customerName === user?.name) {
+        const previousBooking = previousBookings.current.find(pb => pb.id === currentBooking.id);
+        return previousBooking && 
+               !previousBooking.verificationCode && 
+               currentBooking.verificationCode; // Code was added
+      }
+      return false;
+    });
+    
+    // If verification code was just added to an accepted booking, refresh UI
+    if (verificationCodeUpdatedBookings.length > 0 && showAcceptanceScreen) {
+      if(process.env.NODE_ENV === 'development') {
+        console.log('🔄 VERIFICATION CODE APPEARED IN BOOKING, FORCING UI UPDATE:', {
+          bookingId: verificationCodeUpdatedBookings[0].id,
+          newCode: verificationCodeUpdatedBookings[0].verificationCode,
+          timestamp: new Date().toISOString()
+        });
+      }
+      
+      // Force a re-render by toggling the acceptance screen
+      setShowAcceptanceScreen(false);
+      setTimeout(() => {
+        setShowAcceptanceScreen(true);
+      }, 100);
+    }
+    
     // Only show acceptance screen if no cancellation occurred for this transition
     if (searchToAcceptTransition && !showAcceptanceScreen && !cancellationOccurred) {
       if(process.env.NODE_ENV === 'development') console.log('🎯 Detected direct status change: SEARCHING → ACCEPTED', {
@@ -239,6 +267,65 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
         hasVerificationCode: !!acceptedBooking?.verificationCode,
         verificationCode: acceptedBooking?.verificationCode
       });
+      
+      // Ensure we have the latest booking data with verification code
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('refreshBookings'));
+      }, 500);
+      
+      // Enhanced verification code fetching with multiple strategies
+      const fetchVerificationCode = async () => {
+        try {
+          const { doc, getDoc } = await import('firebase/firestore');
+          const { db } = await import('../firebase');
+          
+          // Find the accepted booking
+          const acceptedBooking = bookings.find(b => 
+            b.status === JobStatus.ACCEPTED && 
+            b.customerName === user?.name
+          );
+          
+          if (acceptedBooking?.id) {
+            if(process.env.NODE_ENV === 'development') {
+              console.log('🔄 ATTEMPTING DIRECT VERIFICATION CODE FETCH:', {
+                bookingId: acceptedBooking.id,
+                currentHasCode: !!acceptedBooking.verificationCode,
+                attemptTime: new Date().toISOString()
+              });
+            }
+            
+            const bookingDoc = await getDoc(doc(db, 'bookings', acceptedBooking.id));
+            if (bookingDoc.exists()) {
+              const bookingData = bookingDoc.data();
+              if(process.env.NODE_ENV === 'development') {
+                console.log('✅ DIRECT FIRESTORE FETCH RESULT:', {
+                  bookingId: acceptedBooking.id,
+                  firestoreHasCode: !!bookingData.verificationCode,
+                  firestoreCode: bookingData.verificationCode,
+                  firestoreIsVerified: bookingData.isVerified,
+                  firestoreStatus: bookingData.status,
+                  localHasCode: !!acceptedBooking.verificationCode,
+                  localCode: acceptedBooking.verificationCode
+                });
+              }
+              
+              // If we found the verification code in Firestore but not in local state
+              if (bookingData.verificationCode && !acceptedBooking.verificationCode) {
+                console.log('🎯 VERIFICATION CODE FOUND IN FIRESTORE, TRIGGERING REFRESH');
+                window.dispatchEvent(new CustomEvent('refreshBookings'));
+              }
+            }
+          }
+        } catch (error) {
+          console.error('❌ Direct verification code fetch error:', error);
+        }
+      };
+      
+      // Multiple fetch attempts with different intervals
+      setTimeout(fetchVerificationCode, 500);  // First attempt
+      setTimeout(fetchVerificationCode, 1500); // Second attempt
+      setTimeout(fetchVerificationCode, 3000); // Third attempt
+      
       setShowAcceptanceScreen(true);
       setTimeout(() => {
         setShowAcceptanceScreen(false);
@@ -858,16 +945,32 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
   
   if (showAcceptanceScreen) {
     // Get the accepted booking to display details
-    const acceptedBooking = bookings.find(b => 
-      b.status === JobStatus.ACCEPTED && 
-      b.customerName === user?.name
-    );
+    const acceptedBooking = useMemo(() => {
+      return bookings.find(b => 
+        b.status === JobStatus.ACCEPTED && 
+        b.customerName === user?.name
+      );
+    }, [bookings, user?.name]);
     
     // Check if there's a cancelled booking to avoid showing acceptance screen when cancelled
-    const cancelledBooking = bookings.find(b => 
-      b.status === JobStatus.CANCELLED && 
-      b.customerName === user?.name
-    );
+    const cancelledBooking = useMemo(() => {
+      return bookings.find(b => 
+        b.status === JobStatus.CANCELLED && 
+        b.customerName === user?.name
+      );
+    }, [bookings, user?.name]);
+    
+    // DEBUG: Log the verification code status every time this renders
+    if (process.env.NODE_ENV === 'development' && acceptedBooking) {
+      console.log('🔄 ACCEPTANCE SCREEN RENDER - VERIFICATION CODE STATUS:', {
+        bookingId: acceptedBooking.id,
+        hasVerificationCode: !!acceptedBooking.verificationCode,
+        verificationCode: acceptedBooking.verificationCode,
+        status: acceptedBooking.status,
+        customerName: acceptedBooking.customerName,
+        timestamp: new Date().toISOString()
+      });
+    }
     
     // Don't show acceptance screen if booking has been cancelled
     if (cancelledBooking) {

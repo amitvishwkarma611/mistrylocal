@@ -50,7 +50,7 @@ const App: React.FC = () => {
   
   // Debug logging for admin mode
   useEffect(() => {
-    console.log('isAdminMode changed to:', isAdminMode);
+    if(process.env.NODE_ENV === 'development') console.log('isAdminMode changed to:', isAdminMode);
   }, [isAdminMode]);
   const [language, setLanguage] = useState<Language>((localStorage.getItem('mistry_lang') as Language) || 'EN');
   const [bookings, setBookings] = useState<Booking[]>(INITIAL_BOOKINGS);
@@ -82,7 +82,7 @@ const App: React.FC = () => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // Open admin page with Ctrl+A
       if (e.key === 'a' && e.ctrlKey && !e.shiftKey && !e.altKey) {
-        console.log('Opening admin page with Ctrl+A!');
+        if(process.env.NODE_ENV === 'development') console.log('Opening admin page with Ctrl+A!');
         // Open in new window with full web dimensions
         const adminUrl = window.location.origin + window.location.pathname + '?admin=true';
         const adminWindow = window.open(adminUrl, '_blank', 'width=1200,height=800,resizable=yes,scrollbars=yes');
@@ -163,7 +163,7 @@ const App: React.FC = () => {
         const messaging = getMessaging();
         
         unsubscribe = onMessage(messaging, (payload) => {
-          console.log('🔔 Foreground message received:', payload);
+          if(process.env.NODE_ENV === 'development') console.log('🔔 Foreground message received:', payload);
           // Show browser notification
           if (Notification.permission === 'granted') {
             new Notification(payload.notification?.title || 'New Job', {
@@ -190,11 +190,11 @@ const App: React.FC = () => {
   useEffect(() => {
     // Listen for messages from service worker
     const handleNotificationClick = (event: MessageEvent) => {
-      console.log('📬 App received message from SW:', event.data);
+      if(process.env.NODE_ENV === 'development') console.log('📬 App received message from SW:', event.data);
       
       if (event.data && event.data.type === 'NOTIFICATION_CLICKED') {
         const data = event.data.data;
-        console.log('📬 Notification clicked with data:', data);
+        if(process.env.NODE_ENV === 'development') console.log('📬 Notification clicked with data:', data);
         
         // Store the notification data for the app to use
         window.notificationData = data;
@@ -637,7 +637,10 @@ const App: React.FC = () => {
               ratingSubmitted: b.ratingSubmitted || false,
               ratingSubmittedAt: b.ratingSubmittedAt?.toDate?.().getTime() || undefined,
               ratingValue: b.ratingValue,
-              ratingTags: b.ratingTags || []
+              ratingTags: b.ratingTags || [],
+              // Verification code system
+              verificationCode: b.verificationCode,
+              isVerified: b.isVerified || false
             };
           }));
           

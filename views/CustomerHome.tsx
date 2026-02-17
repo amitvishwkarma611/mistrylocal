@@ -4,7 +4,7 @@ import { SERVICES, CATEGORIES, getIcon } from '../constants';
 import { analyzeCarpentryPhoto } from '../geminiService';
 import { Booking, JobStatus, Carpenter, AppRole } from '../types';
 import { translations, Language } from '../translations';
-import { Camera, Star, BadgeCheck, Loader2, X, ArrowRight, Hammer, PenLine, Radar, Zap, MessageSquare, Phone, Navigation, ChevronRight, CheckSquare, Square, CheckCircle as CheckCircle2, IndianRupee, Clock } from 'lucide-react';
+import { Camera, Star, BadgeCheck, Loader2, X, ArrowRight, Hammer, PenLine, Radar, Zap, MessageSquare, Phone, Navigation, ChevronRight, CheckSquare, Square, CheckCircle as CheckCircle2, IndianRupee, Clock, ShieldCheck } from 'lucide-react';
 import { createBooking } from '../services/bookingService';
 import { SERVICE_LIST } from '../data/serviceList';
 import { applyMinimumPrice } from '../services/priceService';
@@ -59,6 +59,14 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
       b.customerName === user?.name
     );
   }, [bookings, user?.name]);
+      
+  // Get the accepted booking for verification display
+  const acceptedBooking = useMemo(() => {
+    return bookings.find(b => 
+      b.status === JobStatus.ACCEPTED && 
+      b.customerName === user?.name
+    );
+  }, [bookings, user?.name]);
   
   // Store previous searching state to detect transition
   const hadSearchingJob = useRef(false);
@@ -86,7 +94,7 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
     });
     
     // Only log when there are actual status changes to prevent repeated logs
-    if (statusChangedBookings.length > 0) {
+    if (statusChangedBookings.length > 0 && process.env.NODE_ENV === 'development') {
       console.log('🔍 CustomerHome Debug:', {
         user: user?.name,
         totalBookings: bookings.length,
@@ -113,7 +121,7 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
     
     // If we had a searching job and now have an accepted job, show acceptance screen
     if (hadSearchingJob.current && !currentlySearching && hasAccepted && !showAcceptanceScreen) {
-      console.log('🎯 Detected transition: SEARCHING → ACCEPTED');
+      if(process.env.NODE_ENV === 'development') console.log('🎯 Detected transition: SEARCHING → ACCEPTED');
       setShowAcceptanceScreen(true);
       // Hide after 3 seconds
       setTimeout(() => {
@@ -139,7 +147,7 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
     
     // Only show acceptance screen if no cancellation occurred for this transition
     if (searchToAcceptTransition && !showAcceptanceScreen && !cancellationOccurred) {
-      console.log('🎯 Detected direct status change: SEARCHING → ACCEPTED');
+      if(process.env.NODE_ENV === 'development') console.log('🎯 Detected direct status change: SEARCHING → ACCEPTED');
       setShowAcceptanceScreen(true);
       setTimeout(() => {
         setShowAcceptanceScreen(false);
@@ -149,7 +157,7 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
         }
       }, 3000);
     } else if (cancellationOccurred) {
-      console.log('🎯 Cancellation detected, hiding acceptance screen if showing');
+      if(process.env.NODE_ENV === 'development') console.log('🎯 Cancellation detected, hiding acceptance screen if showing');
       // If cancellation occurred and acceptance screen is showing, hide it
       if (showAcceptanceScreen) {
         setShowAcceptanceScreen(false);
@@ -257,7 +265,7 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
 
 
   const handleBooking = async (ids?: string[], user?: { role: AppRole; name: string; phone: string; uid: string }) => {
-    console.log('🚀 handleBooking called with:', { ids, user });
+    if(process.env.NODE_ENV === 'development') console.log('🚀 handleBooking called with:', { ids, user });
     
     // Validate user authentication
     if (!user || !user.uid) {
@@ -274,7 +282,7 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
     const allServices = getServicesForType();
     const selected = allServices.filter(s => sIds.includes(s.id));
     
-    console.log('📋 Selected services:', selected);
+    if(process.env.NODE_ENV === 'development') console.log('📋 Selected services:', selected);
     
     let text = "";
     let totalPrice = 0;
@@ -300,7 +308,7 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
       return;
     }
     
-    console.log('📝 Booking details:', {
+    if(process.env.NODE_ENV === 'development') console.log('📝 Booking details:', {
       customerId: user.uid,
       customerName: user.name,
       customerPhone: user.phone,
@@ -310,7 +318,7 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
     
     try {
       // Create booking in Firestore with real-time capability
-      console.log('📤 Creating booking in Firestore...');
+      if(process.env.NODE_ENV === 'development') console.log('📤 Creating booking in Firestore...');
       const bookingId = await createBooking({
         customerId: user.uid,
         customerName: user.name,
@@ -326,27 +334,100 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
         serviceType: selectedServiceType
       });
       
-      console.log('✅ Booking created successfully with ID:', bookingId);
+      if(process.env.NODE_ENV === 'development') console.log('✅ Booking created successfully with ID:', bookingId);
       
-      // Create a temporary booking object to show in UI immediately
-      const newBooking = {
-        id: bookingId,
-        service: text,
-        mistry: 'Searching...',
-        status: JobStatus.SEARCHING,
-        time: 'Just now',
-        address: selectedArea,
-        lat: 28.4595,
-        lng: 77.0266,
-        price: `₹${totalPrice}`,
-        isUpcoming: true,
-        isRated: false,
-        customerName: user.name,
-        createdAt: Date.now()
-      };
-      
-      console.log('📱 Adding booking to UI immediately:', newBooking);
-      onBook(newBooking);
+      // Fetch the actual booking document to get verification code
+      try {
+        const { doc, getDoc } = await import('firebase/firestore');
+        const { db } = await import('../firebase');
+        
+        // Wait a moment for the document to be fully created
+        await new Promise(resolve => setTimeout(resolve, 500));
+        
+        const bookingDoc = await getDoc(doc(db, 'bookings', bookingId));
+        
+        if(process.env.NODE_ENV === 'development') {
+          console.log('🔍 Firestore booking document check:', {
+            exists: bookingDoc.exists(),
+            bookingId: bookingId,
+            data: bookingDoc.exists() ? bookingDoc.data() : null
+          });
+        }
+        if (bookingDoc.exists()) {
+          const bookingData = bookingDoc.data();
+          
+          const newBooking = {
+            id: bookingId,
+            service: text,
+            mistry: 'Searching...',
+            status: JobStatus.SEARCHING,
+            time: 'Just now',
+            address: selectedArea,
+            lat: 28.4595,
+            lng: 77.0266,
+            price: `₹${totalPrice}`,
+            isUpcoming: true,
+            isRated: false,
+            customerName: user.name,
+            createdAt: Date.now(),
+            verificationCode: bookingData.verificationCode,
+            isVerified: bookingData.isVerified || false
+          };
+          
+          if(process.env.NODE_ENV === 'development') console.log('📱 Adding booking to UI with verification code:', newBooking);
+          onBook(newBooking);
+        } else {
+          // Fallback to temporary booking if document not found
+          const tempBooking = {
+            id: bookingId,
+            service: text,
+            mistry: 'Searching...',
+            status: JobStatus.SEARCHING,
+            time: 'Just now',
+            address: selectedArea,
+            lat: 28.4595,
+            lng: 77.0266,
+            price: `₹${totalPrice}`,
+            isUpcoming: true,
+            isRated: false,
+            customerName: user.name,
+            createdAt: Date.now()
+          };
+          
+          if(process.env.NODE_ENV === 'development') console.log('📱 Adding temporary booking to UI:', tempBooking);
+          onBook(tempBooking);
+          
+          // Trigger refresh to get the real data with verification code
+          setTimeout(() => {
+            window.dispatchEvent(new CustomEvent('refreshBookings'));
+          }, 1000);
+        }
+      } catch (fetchError) {
+        console.error('❌ Error fetching booking document:', fetchError);
+        // Fallback to temporary booking
+        const tempBooking = {
+          id: bookingId,
+          service: text,
+          mistry: 'Searching...',
+          status: JobStatus.SEARCHING,
+          time: 'Just now',
+          address: selectedArea,
+          lat: 28.4595,
+          lng: 77.0266,
+          price: `₹${totalPrice}`,
+          isUpcoming: true,
+          isRated: false,
+          customerName: user.name,
+          createdAt: Date.now()
+        };
+        
+        onBook(tempBooking);
+        
+        // Trigger refresh to get the real data
+        setTimeout(() => {
+          window.dispatchEvent(new CustomEvent('refreshBookings'));
+        }, 1000);
+      }
       
       // Trigger immediate refresh to ensure UI updates quickly
       setTimeout(() => {
@@ -359,7 +440,7 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
       setIsCustomMode(false);
       setAiResult(null);
       
-      console.log('✅ Booking process completed successfully');
+      if(process.env.NODE_ENV === 'development') console.log('✅ Booking process completed successfully');
       
     } catch (error) {
       console.error('❌ Error creating booking:', error);
@@ -399,6 +480,87 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
       return null; // Return null to render nothing
     }
     
+    // Debug logging
+    if(process.env.NODE_ENV === 'development') {
+      console.log('🎯 Acceptance screen debug:', {
+        acceptedBooking,
+        hasVerificationCode: !!acceptedBooking?.verificationCode,
+        bookingId: acceptedBooking?.id,
+        status: acceptedBooking?.status,
+        verificationCode: acceptedBooking?.verificationCode
+      });
+      
+      // Log all bookings for debugging
+      console.log('📋 All current bookings:', bookings.map(b => ({
+        id: b.id,
+        status: b.status,
+        customerName: b.customerName,
+        hasVerificationCode: !!b.verificationCode,
+        verificationCode: b.verificationCode
+      })));
+      
+      // Direct Firestore check for verification code
+      if (acceptedBooking?.id) {
+        import('firebase/firestore').then(async (firestore) => {
+          const { doc, getDoc } = firestore;
+          import('../firebase').then(async (firebase) => {
+            const bookingDoc = await getDoc(doc(firebase.db, 'bookings', acceptedBooking.id));
+            console.log('🔍 Direct Firestore check for accepted booking:', {
+              exists: bookingDoc.exists(),
+              data: bookingDoc.exists() ? bookingDoc.data() : null,
+              verificationCode: bookingDoc.exists() ? bookingDoc.data().verificationCode : null
+            });
+          });
+        });
+      }
+    }
+    
+    // Refresh bookings when verification code might be available
+    useEffect(() => {
+      if (showAcceptanceScreen && acceptedBooking && !acceptedBooking.verificationCode) {
+        // Direct Firestore fetch for the specific booking
+        const fetchBookingDirectly = async () => {
+          try {
+            const { doc, getDoc } = await import('firebase/firestore');
+            const { db } = await import('../firebase');
+            
+            const bookingDoc = await getDoc(doc(db, 'bookings', acceptedBooking.id));
+            if (bookingDoc.exists()) {
+              const bookingData = bookingDoc.data();
+              if(process.env.NODE_ENV === 'development') {
+                console.log('🔍 Direct Firestore fetch result:', {
+                  id: acceptedBooking.id,
+                  verificationCode: bookingData.verificationCode,
+                  isVerified: bookingData.isVerified
+                });
+              }
+              
+              // If we found the verification code, trigger a full refresh
+              if (bookingData.verificationCode) {
+                window.dispatchEvent(new CustomEvent('refreshBookings'));
+              }
+            }
+          } catch (error) {
+            console.error('❌ Error in direct Firestore fetch:', error);
+          }
+        };
+        
+        // Fetch immediately and then every 2 seconds
+        fetchBookingDirectly();
+        const refreshInterval = setInterval(fetchBookingDirectly, 2000);
+        
+        // Stop after 15 seconds
+        const stopInterval = setTimeout(() => {
+          clearInterval(refreshInterval);
+        }, 15000);
+        
+        return () => {
+          clearInterval(refreshInterval);
+          clearTimeout(stopInterval);
+        };
+      }
+    }, [showAcceptanceScreen, acceptedBooking]);
+    
     return (
       <div className="flex flex-col items-center justify-center min-h-[80vh] p-8 text-center animate-in fade-in zoom-in-95 duration-500">
         <div className="relative mb-8">
@@ -420,6 +582,64 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
               <p className="text-sm font-bold text-amber-900">{acceptedBooking?.address || 'Your location'}</p>
             </div>
           </div>
+          
+          {/* Verification Code Display */}
+          {acceptedBooking && (
+            <div className="mb-6 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-4">
+              <div className="flex items-center gap-3 mb-3">
+                <div className="w-8 h-8 bg-amber-100 rounded-xl flex items-center justify-center">
+                  <ShieldCheck size={20} className="text-amber-600" />
+                </div>
+                <div>
+                  <p className="text-[10px] font-black uppercase text-amber-700 tracking-widest">Security Code</p>
+                  <p className="text-xs font-bold text-amber-800">Share with your worker</p>
+                </div>
+              </div>
+              {acceptedBooking.verificationCode ? (
+                <div className="bg-white border-2 border-amber-200 rounded-xl p-4 text-center animate-in zoom-in-95">
+                  <p className="text-[10px] font-black uppercase text-gray-500 tracking-widest mb-1">Verification Code</p>
+                  <p className="text-3xl font-black text-amber-900 tracking-widest">{acceptedBooking.verificationCode}</p>
+                  <p className="text-[10px] font-bold text-gray-600 mt-2">Worker must enter this code before starting work</p>
+                </div>
+              ) : (
+                <div className="bg-white border-2 border-amber-200 rounded-xl p-4 text-center">
+                  <div className="flex items-center justify-center gap-2 mb-2">
+                    <div className="w-3 h-3 bg-amber-500 rounded-full animate-pulse"></div>
+                    <p className="text-sm font-bold text-amber-700">Generating security code...</p>
+                  </div>
+                  <p className="text-xs text-gray-500 mb-3">This may take a few seconds</p>
+                  <div className="flex gap-2 justify-center">
+                    <button 
+                      onClick={() => window.dispatchEvent(new CustomEvent('refreshBookings'))}
+                      className="text-xs bg-amber-100 hover:bg-amber-200 text-amber-800 px-3 py-1 rounded-lg font-bold transition-colors"
+                    >
+                      Refresh Data
+                    </button>
+                    <button 
+                      onClick={async () => {
+                        try {
+                          const { doc, getDoc } = await import('firebase/firestore');
+                          const { db } = await import('../firebase');
+                                          
+                          const bookingDoc = await getDoc(doc(db, 'bookings', acceptedBooking.id));
+                          if (bookingDoc.exists()) {
+                            const bookingData = bookingDoc.data();
+                            console.log('🔍 Force fetch result:', bookingData);
+                            window.dispatchEvent(new CustomEvent('refreshBookings'));
+                          }
+                        } catch (error) {
+                          console.error('❌ Force fetch error:', error);
+                        }
+                      }}
+                      className="text-xs bg-orange-100 hover:bg-orange-200 text-orange-800 px-3 py-1 rounded-lg font-bold transition-colors"
+                    >
+                      Force Refresh
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
           <div className="flex items-center gap-3 mb-4">
             <div className="w-10 h-10 bg-green-100 rounded-xl flex items-center justify-center">
               <IndianRupee size={20} className="text-green-600" />
@@ -517,7 +737,7 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
               {t('photo_upload')}
               <input type="file" className="hidden" accept="image/*" onChange={handleFileUpload} />
             </label>
-            <button onClick={() => { setIsCustomMode(true); setSelectedServiceIds([]); setAiResult(null); }} className="inline-flex items-center gap-2 px-6 py-3 bg-amber-700/50 border border-amber-600/50 text-white rounded-2xl font-bold text-sm w-full justify-center">
+            <button onClick={() => { setIsCustomMode(true); setSelectedServiceIds([]); setAiResult(null); }} className="inline-flex items-center gap-2 px-6 py-3 bg-amber-700/50 border border-amber-600/50 text-white rounded-2xl font-bold text-sm w-full justify-center tap-target-large touch-active">
               <PenLine size={18} /> {t('manual_write')}
             </button>
           </div>
@@ -532,7 +752,7 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
             <button onClick={() => setIsCustomMode(false)} className="text-gray-400 p-1 hover:bg-gray-100 rounded-full"><X size={20}/></button>
           </div>
           <textarea value={customIssue} onChange={(e) => setCustomIssue(e.target.value)} placeholder="E.g. My wooden shoe rack door is broken..." className="w-full bg-gray-50 border border-gray-200 rounded-2xl p-4 text-sm min-h-[100px] mb-4 text-amber-900" />
-          <button disabled={!customIssue.trim()} onClick={() => handleBooking(undefined, user)} className="w-full py-4 bg-orange-600 text-white rounded-2xl font-bold text-sm shadow-lg shadow-orange-100 flex items-center justify-center gap-2">
+          <button disabled={!customIssue.trim()} onClick={() => handleBooking(undefined, user)} className="w-full py-4 bg-orange-600 text-white rounded-2xl font-bold text-sm shadow-lg shadow-orange-100 flex items-center justify-center gap-2 tap-target-large touch-active">
             {t('find_now')} <ArrowRight size={18} />
           </button>
         </div>
@@ -555,7 +775,7 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
         <div className="grid grid-cols-3 gap-2">
           <button
             onClick={() => setSelectedServiceType('carpenter')}
-            className={`p-3 rounded-xl border transition-all text-center ${
+            className={`p-3 rounded-xl border transition-all text-center tap-target-large touch-active ${
               selectedServiceType === 'carpenter' 
                 ? 'bg-orange-50 border-orange-500 shadow-inner' 
                 : 'bg-gray-50 border-gray-200 hover:border-orange-200'
@@ -573,7 +793,7 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
           
           <button
             onClick={() => setSelectedServiceType('plumber')}
-            className={`p-3 rounded-xl border transition-all text-center ${
+            className={`p-3 rounded-xl border transition-all text-center tap-target-large touch-active ${
               selectedServiceType === 'plumber' 
                 ? 'bg-blue-50 border-blue-500 shadow-inner' 
                 : 'bg-gray-50 border-gray-200 hover:border-blue-200'
@@ -591,7 +811,7 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
           
           <button
             onClick={() => setSelectedServiceType('electrician')}
-            className={`p-3 rounded-xl border transition-all text-center ${
+            className={`p-3 rounded-xl border transition-all text-center tap-target-large touch-active ${
               selectedServiceType === 'electrician' 
                 ? 'bg-yellow-50 border-yellow-500 shadow-inner' 
                 : 'bg-gray-50 border-gray-200 hover:border-yellow-200'
@@ -627,7 +847,7 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
                   <button 
                     key={service.id} 
                     onClick={() => toggleService(service.id)} 
-                    className={`p-3.5 rounded-2xl border transition-all text-left flex flex-col gap-2 group relative h-full ${isSelected ? 'bg-orange-50 border-orange-500 shadow-inner scale-[0.98]' : 'bg-white border-gray-100 hover:border-orange-200 hover:shadow-md active:scale-95'}`}
+                    className={`p-3.5 rounded-2xl border transition-all text-left flex flex-col gap-2 group relative h-full tap-target-large ${isSelected ? 'bg-orange-50 border-orange-500 shadow-inner scale-[0.98]' : 'bg-white border-gray-100 hover:border-orange-200 hover:shadow-md active:scale-95 touch-active'}`}
                   >
                     <div className="absolute top-2 right-2">
                       {isSelected ? <CheckSquare size={16} className="text-orange-600" /> : <Square size={16} className="text-gray-200 group-hover:text-orange-100" />}
@@ -661,6 +881,19 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
       <div className="flex items-center justify-between mb-4 px-1">
         <h3 className="text-lg font-bold text-amber-900">{t('active_near')}</h3>
       </div>
+      
+      {/* Professional Trust Verification Notice */}
+      <div className="mb-6 bg-gradient-to-r from-green-50 to-emerald-50 border border-green-100 rounded-2xl p-4 shadow-sm">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 bg-green-100 rounded-xl flex items-center justify-center flex-shrink-0">
+            <ShieldCheck size={20} className="text-green-600" />
+          </div>
+          <div className="flex-1">
+            <p className="text-[10px] font-black uppercase text-green-700 tracking-widest mb-1">Verified Professionals</p>
+            <p className="text-sm font-bold text-green-800">All carpenters are background-checked and rated 4.5+ stars</p>
+          </div>
+        </div>
+      </div>
       <div className="flex flex-col gap-4 pb-40">
         {carpenters.map(carp => (
           <div key={carp.id} className="bg-white border border-gray-100 rounded-3xl p-4 flex gap-4 hover:shadow-md transition-all">
@@ -679,8 +912,8 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
                 </div>
               </div>
               <div className="flex gap-2">
-                <button className="flex-1 py-2 bg-green-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 active:scale-95 transition-transform"><MessageSquare size={14} /></button>
-                <button className="px-4 py-2 border border-gray-100 text-amber-900 rounded-xl text-xs font-bold active:scale-95 transition-transform"><Phone size={14} /></button>
+                <button className="flex-1 py-2 bg-green-500 text-white rounded-xl text-xs font-bold flex items-center justify-center gap-1.5 active:scale-95 transition-transform tap-target-large touch-active"><MessageSquare size={14} /></button>
+                <button className="px-4 py-2 border border-gray-100 text-amber-900 rounded-xl text-xs font-bold active:scale-95 transition-transform tap-target-large touch-active"><Phone size={14} /></button>
               </div>
             </div>
           </div>
@@ -699,10 +932,10 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
                <p className="text-base sm:text-xl font-black flex items-center gap-1">₹{calculatedTotal}</p>
             </div>
             <div className="flex items-center gap-2 sm:gap-3">
-               <button onClick={() => setSelectedServiceIds([])} className="p-2 sm:p-3 bg-white/10 rounded-xl sm:rounded-2xl hover:bg-white/20 transition-all active:scale-95 min-w-[32px] min-h-[32px] flex items-center justify-center"><X className="sm:size-5" size={16}/></button>
+               <button onClick={() => setSelectedServiceIds([])} className="p-2 sm:p-3 bg-white/10 rounded-xl sm:rounded-2xl hover:bg-white/20 transition-all active:scale-95 min-w-[32px] min-h-[32px] flex items-center justify-center tap-target-large touch-active"><X className="sm:size-5" size={16}/></button>
                <button 
                  onClick={() => handleBooking(undefined, user)} 
-                 className="py-2 sm:py-3 px-4 sm:px-6 bg-orange-600 rounded-xl sm:rounded-2xl font-black text-[10px] sm:text-xs flex items-center gap-1 sm:gap-2 shadow-lg shadow-black/20 active:scale-95 transition-all hover:bg-orange-700 min-w-[100px]"
+                 className="py-2 sm:py-3 px-4 sm:px-6 bg-orange-600 rounded-xl sm:rounded-2xl font-black text-[10px] sm:text-xs flex items-center gap-1 sm:gap-2 shadow-lg shadow-black/20 active:scale-95 transition-all hover:bg-orange-700 min-w-[100px] tap-target-large touch-active"
                  disabled={creatingBooking}
                >
                  {creatingBooking ? (

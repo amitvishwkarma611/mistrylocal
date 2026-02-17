@@ -11,14 +11,47 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Consistent spacing and border radius system */
+.section-padding {
+  padding: 1rem; /* 16px mobile */
+}
+
+@media (min-width: 640px) {
+  .section-padding {
+    padding: 1.5rem; /* 24px desktop */
+  }
+}
+
+.card-padding {
+  padding: 0.875rem; /* 14px */
+}
+
+@media (min-width: 640px) {
+  .card-padding {
+    padding: 1rem; /* 16px */
+  }
+}
+
+.card-gap {
+  gap: 0.75rem; /* 12px */
+}
+
+.border-radius-standard {
+  border-radius: 12px;
+}
+
+.shadow-soft {
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03);
+}
+
 .mobile-container {
   max-width: 480px;
   margin: 0 auto;
   min-height: 100vh;
   background: white;
   box-shadow: 
-    0 0 30px rgba(249, 115, 22, 0.08),
-    0 0 60px rgba(249, 115, 22, 0.04),
+    0 4px 6px -1px rgba(0, 0, 0, 0.05),
+    0 2px 4px -1px rgba(0, 0, 0, 0.03),
     inset 0 1px 0 rgba(255, 255, 255, 0.9);
   border-radius: 2px;
   position: relative;
@@ -106,22 +139,22 @@ body {
 * {
   transition-property: background-color, border-color, color, fill, stroke, opacity, box-shadow, transform;
   transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-  transition-duration: 200ms;
+  transition-duration: 150ms; /* Updated from 200ms to 150ms for faster response */
 }
 
 /* Enhanced button states */
 button:not(.no-transition) {
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1); /* Updated from 0.2s to 0.15s for faster response */
 }
 
 button:not(.no-transition):hover {
-  transform: translateY(-2px);
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+  transform: translateY(-1px); /* Reduced from -2px for subtler effect */
+  box-shadow: 0 6px 12px rgba(0, 0, 0, 0.1);
 }
 
 button:not(.no-transition):active {
   transform: translateY(0);
-  transition-duration: 100ms;
+  transition-duration: 75ms; /* Reduced from 100ms for faster response */
 }
 
 /* Card hover effects */
@@ -130,10 +163,10 @@ button:not(.no-transition):active {
 }
 
 .card-hover:hover {
-  transform: translateY(-4px) scale(1.02);
+  transform: translateY(-2px) scale(1.01); /* Updated from 1.02 to 1.01 for lighter effect */
   box-shadow: 
-    0 20px 40px rgba(0, 0, 0, 0.12),
-    0 8px 16px rgba(0, 0, 0, 0.08);
+    0 8px 16px rgba(0, 0, 0, 0.08),
+    0 4px 8px rgba(0, 0, 0, 0.06);
 }
 
 /* Text selection enhancement */
@@ -179,6 +212,50 @@ button:not(.no-transition):active {
   background-size: 200% 100%;
   animation: shimmer 1.5s infinite;
   border-radius: 8px;
+}
+
+/* Minimum skeleton display time */
+.skeleton-minimum {
+  min-height: 100px;
+  min-width: 100px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Loading state with minimum duration */
+.loading-minimum {
+  animation: loadingMinDuration 400ms forwards; /* Ensures minimum 400ms display */
+}
+
+@keyframes loadingMinDuration {
+  0% { opacity: 1; }
+  100% { opacity: 1; }
+}
+
+/* Typography improvements */
+.font-heading {
+  font-weight: 600;
+}
+
+.font-body {
+  font-weight: 400;
+}
+
+.text-muted {
+  color: #6b7280; /* gray-500 */
+}
+
+.line-height-tight {
+  line-height: 1.4;
+}
+
+.line-height-normal {
+  line-height: 1.5;
+}
+
+.line-height-loose {
+  line-height: 1.6;
 }
 
 /* Micro-interaction classes */
@@ -380,6 +457,24 @@ button:not(.no-transition):active {
     min-height: 44px;
     min-width: 44px;
   }
+}
+
+/* Touch feedback refinements */
+.touch-active {
+  opacity: 0.7;
+  transition: opacity 0.15s ease-out;
+}
+
+/* Ensure minimum touch target sizes */
+.tap-target-large {
+  min-height: 44px;
+  min-width: 44px;
+  padding: 12px;
+}
+
+/* Prevent double-tap zoom on iOS */
+button, input, select, textarea, label {
+  touch-action: manipulation;
 }
 
 /* Orientation handling */

@@ -27,7 +27,7 @@ const SkeletonCard: React.FC<SkeletonCardProps> = ({
   const skeletons = Array.from({ length: count }, (_, index) => (
     <div 
       key={index}
-      className={`bg-gray-100 rounded-2xl animate-pulse ${className}`}
+      className={`bg-gray-100 rounded-2xl animate-pulse loading-minimum ${className}`}
       style={variantStyles}
     >
       <div className="flex items-center gap-3">
@@ -54,7 +54,7 @@ const SkeletonProfile: React.FC<SkeletonProfileProps> = ({
   showStats = false 
 }) => {
   return (
-    <div className={`bg-gray-100 rounded-2xl p-4 animate-pulse ${className}`}>
+    <div className={`bg-gray-100 rounded-2xl p-4 animate-pulse loading-minimum ${className}`}>
       <div className="flex items-center gap-4">
         <div className="w-16 h-16 bg-gray-200 rounded-full flex-shrink-0"></div>
         <div className="flex-1">
@@ -110,7 +110,7 @@ const SkeletonStats: React.FC<SkeletonStatsProps> = ({
   const stats = Array.from({ length: count }, (_, index) => (
     <div 
       key={index}
-      className={`bg-gray-100 rounded-2xl p-4 animate-pulse ${className} min-w-[120px]`}
+      className={`bg-gray-100 rounded-2xl p-4 animate-pulse loading-minimum ${className} min-w-[120px]`}
     >
       <div className="h-4 bg-gray-200 rounded mb-2 w-1/3"></div>
       <div className="h-6 bg-gray-200 rounded w-2/3"></div>
@@ -138,7 +138,7 @@ const SkeletonList: React.FC<SkeletonListProps> = ({
   const items = Array.from({ length: count }, (_, index) => (
     <div 
       key={index}
-      className={`bg-gray-100 rounded-xl animate-pulse ${className}`}
+      className={`bg-gray-100 rounded-xl animate-pulse loading-minimum ${className}`}
       style={{ height: itemHeight }}
     >
       <div className="flex items-center gap-3 h-full px-4">
@@ -209,7 +209,7 @@ const SkeletonButton: React.FC<SkeletonButtonProps> = ({
   const buttons = Array.from({ length: count }, (_, index) => (
     <div 
       key={index}
-      className={`bg-gray-200 animate-pulse ${getButtonClass()} ${className}`}
+      className={`bg-gray-200 animate-pulse loading-minimum ${getButtonClass()} ${className}`}
     ></div>
   ));
 

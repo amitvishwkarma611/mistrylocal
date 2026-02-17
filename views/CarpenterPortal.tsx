@@ -1,9 +1,9 @@
 
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Star, BadgeCheck, Phone, CheckCircle, Clock, MapPin, IndianRupee, Navigation, MessageSquare, Hammer, Zap, AlertCircle, Radar, ChevronRight, History, X, Gift } from 'lucide-react';
+import { Star, BadgeCheck, Phone, CheckCircle, Clock, MapPin, IndianRupee, Navigation, MessageSquare, Hammer, Zap, AlertCircle, Radar, ChevronRight, History, X, Gift, ShieldCheck } from 'lucide-react';
 import { Booking, JobStatus, AppRole, Carpenter } from '../types';
 import { translations } from '../translations';
-import { setCarpenterOnlineStatus, startPollingSearchingBookings, stopPollingSearchingBookings, acceptJob, createOrUpdateCarpenter, BookingData } from '../services/bookingService';
+import { setCarpenterOnlineStatus, startPollingSearchingBookings, stopPollingSearchingBookings, acceptJob, createOrUpdateCarpenter, BookingData, verifyEntryCode } from '../services/bookingService';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 import { db } from '../firebase';
 import { getWalletBalance, getWalletInfo } from '../services/walletService';
@@ -29,6 +29,9 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
   const [isWorking, setIsWorking] = useState(false); // Track work start state
   const [isFinishing, setIsFinishing] = useState(false); // Track job finish state
   const [carpenterProfile, setCarpenterProfile] = useState<Carpenter | null>(null);
+  const [verificationCode, setVerificationCode] = useState(''); // Track verification code input
+  const [isVerifying, setIsVerifying] = useState(false); // Track verification state
+  const [verificationError, setVerificationError] = useState(''); // Track verification errors
   const { walletBalance, refreshWalletBalance } = useWallet();
   const [showWelcomeMessage, setShowWelcomeMessage] = useState<boolean>(false); // Wallet balance state
   
@@ -57,25 +60,25 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
           
           // Initialize FCM token for push notifications
           try {
-            console.log('🔐 Initializing FCM token for worker:', user.uid);
+            if(process.env.NODE_ENV === 'development') console.log('🔐 Initializing FCM token for worker:', user.uid);
             
             // Use the production-ready FCM token manager
             const { fcmTokenManager } = await import('../src/services/fcmTokenManager');
             const token = await fcmTokenManager.getToken(user.uid);
             
             if (token) {
-              console.log('✅ FCM token ready:', token.substring(0, 20) + '...');
+              if(process.env.NODE_ENV === 'development') console.log('✅ FCM token ready:', token.substring(0, 20) + '...');
             } else {
-              console.warn('⚠️ FCM token initialization failed');
+              if(process.env.NODE_ENV === 'development') console.warn('⚠️ FCM token initialization failed');
             }
             
-            console.log('🔔 FCM token initialization completed for worker:', user.uid);
+            if(process.env.NODE_ENV === 'development') console.log('🔔 FCM token initialization completed for worker:', user.uid);
           } catch (error) {
-            console.error('❌ Failed to initialize FCM token:', error);
+            if(process.env.NODE_ENV === 'development') console.error('❌ Failed to initialize FCM token:', error);
             // Don't block login flow if token initialization fails
           }
         } catch (error) {
-          console.error('Error initializing carpenter profile:', error);
+          if(process.env.NODE_ENV === 'development') console.error('Error initializing carpenter profile:', error);
         }
       }
     };
@@ -87,9 +90,9 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
       isMounted = false;
       if (user && user.uid) {
         // Lightweight update only - no recreating document
-        setCarpenterOnlineStatus(user.uid, false).catch(err => 
-          console.error('Error setting offline status:', err)
-        );
+        setCarpenterOnlineStatus(user.uid, false).catch(err => {
+          if(process.env.NODE_ENV === 'development') console.error('Error setting offline status:', err);
+        });
       }
     };
   }, []); // EMPTY DEPENDENCY ARRAY - RUNS ONLY ONCE
@@ -132,7 +135,7 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
             setCarpenterProfile(profile);
           }
         } catch (error) {
-          console.error('Error fetching carpenter profile:', error);
+          if(process.env.NODE_ENV === 'development') console.error('Error fetching carpenter profile:', error);
         }
       }
     };
@@ -162,7 +165,7 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
             });
           }
         } catch (error) {
-          console.error('Error refreshing carpenter profile:', error);
+          if(process.env.NODE_ENV === 'development') console.error('Error refreshing carpenter profile:', error);
         }
       }
     };
@@ -188,7 +191,7 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
               setTimeout(() => setShowWelcomeMessage(false), 5000);
             }
           } catch (error) {
-            console.error('Error checking wallet info for welcome message:', error);
+            if(process.env.NODE_ENV === 'development') console.error('Error checking wallet info for welcome message:', error);
           }
         }
       };
@@ -201,12 +204,12 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
   useEffect(() => {
     if (carpenterProfile?.serviceAreas && carpenterProfile.serviceAreas.length > 0) {
       setServiceAreas(carpenterProfile.serviceAreas);
-      console.log('📍 Service areas updated from profile:', carpenterProfile.serviceAreas);
+      if(process.env.NODE_ENV === 'development') console.log('📍 Service areas updated from profile:', carpenterProfile.serviceAreas);
     } else {
       // Default to Airoli service areas if none are set
       const defaultServiceAreas = ['400707', '400708'];
       setServiceAreas(defaultServiceAreas);
-      console.log('📍 Using default Airoli service areas');
+      if(process.env.NODE_ENV === 'development') console.log('📍 Using default Airoli service areas');
       
       // Update the profile with default service areas if they're missing
       if (user?.uid && (!carpenterProfile?.serviceAreas || carpenterProfile.serviceAreas.length === 0)) {
@@ -217,13 +220,13 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
             serviceArea: 'airoli' // Set default service area
           })
             .then(() => {
-              console.log('✅ Updated profile with default service areas and service area');
+              if(process.env.NODE_ENV === 'development') console.log('✅ Updated profile with default service areas and service area');
             })
             .catch((error) => {
-              console.error('❌ Failed to update profile with default service areas:', error);
+              if(process.env.NODE_ENV === 'development') console.error('❌ Failed to update profile with default service areas:', error);
             });
         }).catch((error) => {
-          console.error('❌ Failed to import bookingService:', error);
+          if(process.env.NODE_ENV === 'development') console.error('❌ Failed to import bookingService:', error);
         });
       }
     }
@@ -248,6 +251,10 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
   // State for nearby jobs
   const [nearbyJobs, setNearbyJobs] = useState<Booking[]>([]);
   const [serviceAreas, setServiceAreas] = useState<string[]>([]);
+  // Track jobs that this carpenter has passed on to prevent repeated showing
+  const [passedJobs, setPassedJobs] = useState<Set<string>>(new Set());
+  // Ref to ensure polling callback has latest passed jobs
+  const passedJobsRef = useRef<Set<string>>(new Set());
   
   // Refs to track component state
   const isMountedRef = useRef(true);
@@ -294,18 +301,24 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
         }
         
         // Log detailed booking information
-        console.log('📋 Received bookings details:', bookings.map(b => ({
-          id: b.id,
-          serviceType: b.serviceType,
-          status: b.status,
-          pincode: b.pincode,
-          serviceArea: b.serviceArea,
-          description: b.description
-        })));
+        if(process.env.NODE_ENV === 'development') {
+          console.log('📋 Received bookings details:', bookings.map(b => ({
+            id: b.id,
+            serviceType: b.serviceType,
+            status: b.status,
+            pincode: b.pincode,
+            serviceArea: b.serviceArea,
+            description: b.description
+          })));
+          
+          console.log('🚫 Filtering out passed jobs:', Array.from(passedJobsRef.current));
+          console.log('📊 Before filtering (searching only):', bookings.filter(b => b.status === JobStatus.SEARCHING).length, 'jobs');
+        }
         
         // Convert BookingData to Booking interface - ONLY for searching jobs
         const convertedJobs = bookings
           .filter(booking => booking.status === JobStatus.SEARCHING) // Ensure only searching jobs
+          .filter(booking => !passedJobsRef.current.has(booking.id)) // Filter out jobs this carpenter has passed on
           .map(booking => ({
             id: booking.id || '',
             service: booking.description,
@@ -325,6 +338,12 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
         
         // Sort by creation time (newest first)
         const sortedJobs = convertedJobs.sort((a, b) => b.createdAt - a.createdAt);
+        
+        // Log filtering results
+        if(process.env.NODE_ENV === 'development') {
+          console.log('📊 After filtering:', sortedJobs.length, 'jobs');
+          console.log('📋 Filtered job IDs:', sortedJobs.map(j => j.id));
+        }
         
         // Only update if jobs actually changed to prevent unnecessary re-renders
         setNearbyJobs(prevJobs => {
@@ -385,6 +404,34 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
       previousJobId.current = currentJob.id;
     }
   }, [currentJob]);
+  
+  // Keep passedJobsRef synchronized with passedJobs state
+  useEffect(() => {
+    passedJobsRef.current = passedJobs;
+  }, [passedJobs]);
+  
+  // Cleanup old passed jobs to prevent memory growth
+  useEffect(() => {
+    const cleanupInterval = setInterval(() => {
+      // Keep only recent passed jobs (last 24 hours)
+      // For now, we'll keep all passed jobs since they're just IDs
+      // In a production app, you might want to persist this to localStorage
+      // or clean up based on timestamp
+      if (passedJobs.size > 100) {
+        // If we have too many passed jobs, clear the oldest ones
+        // This is a simple approach - in production you might want timestamps
+        const jobsArray = Array.from(passedJobs);
+        const recentJobs = new Set(jobsArray.slice(-50)); // Keep last 50
+        setPassedJobs(recentJobs);
+        
+        if(process.env.NODE_ENV === 'development') {
+          console.log('🧹 Cleaned up passed jobs set, now tracking:', recentJobs.size, 'jobs');
+        }
+      }
+    }, 300000); // Check every 5 minutes
+    
+    return () => clearInterval(cleanupInterval);
+  }, [passedJobs.size]);
 
   // Filter completed jobs for this specific carpenter
   const completedJobs = useMemo(() => {
@@ -561,7 +608,22 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
               >
                 {isAccepting ? 'Accepting...' : t('accept_job')}
               </button>
-              <button onClick={() => {}} className="px-6 py-4 bg-white/10 rounded-2xl font-bold text-sm hover:bg-white/20 transition-all">
+              <button 
+                onClick={() => {
+                  // Track this job as passed by this carpenter
+                  setPassedJobs(prev => new Set(prev).add(activeOffer.id));
+                  
+                  // Remove the current job from nearby jobs list
+                  setNearbyJobs(prev => prev.filter(job => job.id !== activeOffer.id));
+                  
+                  // Log the pass action for debugging
+                  if(process.env.NODE_ENV === 'development') {
+                    console.log('⏭️ Carpenter passed on job:', activeOffer.id);
+                    console.log('📋 Current passed jobs count:', passedJobs.size + 1);
+                  }
+                }} 
+                className="px-6 py-4 bg-white/10 rounded-2xl font-bold text-sm hover:bg-white/20 transition-all active:scale-95"
+              >
                 {t('pass')}
               </button>
             </div>
@@ -656,25 +718,81 @@ const CarpenterPortal: React.FC<CarpenterPortalProps> = ({ bookings, onUpdateSta
                    </div>
                 )}
                 {currentJob.status === JobStatus.ARRIVED && (
-                  <button 
-                    onClick={async () => {
-                      console.log('🔨 Clicked Started Working for job:', currentJob.id);
-                      if (isWorking) return;
-                      setIsWorking(true);
-                      try {
-                        await onUpdateStatus(currentJob.id, JobStatus.WORK_IN_PROGRESS, user?.uid);
-                        console.log('✅ Work started successfully');
-                      } catch (error) {
-                        console.error('❌ Error starting work:', error);
-                      } finally {
-                        setIsWorking(false);
-                      }
-                    }} 
-                    disabled={isWorking}
-                    className="w-full py-4 bg-amber-600 text-white rounded-2xl font-bold text-sm shadow-md flex items-center justify-center gap-2 active:scale-95 transition-all hover:bg-amber-700 hover:shadow-lg animate-in slide-in-from-top-4 duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
-                  >
-                    <Hammer size={18} /> {isWorking ? 'Updating...' : t('started_working')}
-                  </button>
+                  <div className="flex flex-col gap-4">
+                    {/* Verification Code Input */}
+                    <div className="bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-4">
+                      <div className="flex items-center gap-3 mb-3">
+                        <div className="w-8 h-8 bg-amber-100 rounded-xl flex items-center justify-center">
+                          <ShieldCheck size={20} className="text-amber-600" />
+                        </div>
+                        <div>
+                          <p className="text-[10px] font-black uppercase text-amber-700 tracking-widest">Security Verification</p>
+                          <p className="text-xs font-bold text-amber-800">Enter customer verification code</p>
+                        </div>
+                      </div>
+                      
+                      <div className="space-y-3">
+                        <input
+                          type="text"
+                          value={verificationCode}
+                          onChange={(e) => {
+                            setVerificationCode(e.target.value.replace(/[^0-9]/g, '').slice(0, 4));
+                            setVerificationError('');
+                          }}
+                          placeholder="Enter 4-digit code"
+                          maxLength={4}
+                          className="w-full px-4 py-3 bg-white border-2 border-amber-200 rounded-xl text-center text-2xl font-black text-amber-900 tracking-widest focus:outline-none focus:border-amber-500 focus:ring-2 focus:ring-amber-100"
+                        />
+                        
+                        {verificationError && (
+                          <p className="text-xs font-bold text-red-600 text-center animate-in slide-in-from-top-2">
+                            {verificationError}
+                          </p>
+                        )}
+                        
+                        <button 
+                          onClick={async () => {
+                            if (verificationCode.length !== 4) {
+                              setVerificationError('Please enter a 4-digit code');
+                              return;
+                            }
+                            
+                            if (isVerifying) return;
+                            setIsVerifying(true);
+                            setVerificationError('');
+                            
+                            try {
+                              const isValid = await verifyEntryCode(currentJob.id, verificationCode);
+                              
+                              if (isValid) {
+                                // Code verified successfully, start work
+                                await onUpdateStatus(currentJob.id, JobStatus.WORK_IN_PROGRESS, user?.uid);
+                                setVerificationCode(''); // Clear input
+                                console.log('✅ Work started successfully after verification');
+                              } else {
+                                setVerificationError('Invalid verification code');
+                                setVerificationCode(''); // Clear input
+                              }
+                            } catch (error: any) {
+                              console.error('❌ Error verifying code:', error);
+                              setVerificationError(error.message || 'Verification failed');
+                              setVerificationCode(''); // Clear input
+                            } finally {
+                              setIsVerifying(false);
+                            }
+                          }} 
+                          disabled={isVerifying || verificationCode.length !== 4}
+                          className="w-full py-4 bg-amber-600 text-white rounded-2xl font-bold text-sm shadow-md flex items-center justify-center gap-2 active:scale-95 transition-all hover:bg-amber-700 hover:shadow-lg disabled:opacity-50 disabled:cursor-not-allowed"
+                        >
+                          <ShieldCheck size={18} /> {isVerifying ? 'Verifying...' : 'Verify & Start Work'}
+                        </button>
+                      </div>
+                    </div>
+                    
+                    <div className="text-center text-[10px] font-bold text-gray-500">
+                      Customer must provide this code before you can start work
+                    </div>
+                  </div>
                 )}
                 {currentJob.status === JobStatus.WORK_IN_PROGRESS && (
                    <button 

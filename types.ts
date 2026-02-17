@@ -116,4 +116,8 @@ export interface Booking {
   ratingSubmittedAt?: number; // Timestamp when rating was submitted
   ratingValue?: number; // Submitted rating value (1-5)
   ratingTags?: string[]; // Tags associated with the rating
+  
+  // VERIFICATION CODE SYSTEM
+  verificationCode?: string; // 4-digit security code for job verification
+  isVerified?: boolean; // Whether the job has been verified by worker
 }

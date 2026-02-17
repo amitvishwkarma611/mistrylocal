@@ -24,7 +24,7 @@ const SkeletonCard: React.FC<SkeletonCardProps> = ({
 
   return (
     <div 
-      className={`bg-gray-100 animate-pulse rounded-2xl ${className}`}
+      className={`bg-gray-100 animate-pulse rounded-2xl loading-minimum ${className}`}
       style={variantStyles}
     >
       <div className="flex items-center gap-3">

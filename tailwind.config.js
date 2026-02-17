@@ -10,6 +10,19 @@ export default {
       fontFamily: {
         'sans': ['Outfit', 'sans-serif'],
       },
+      spacing: {
+        'section-mobile': '1rem',    // 16px
+        'section-desktop': '1.5rem', // 24px
+        'card-padding-small': '0.875rem', // 14px
+        'card-padding-large': '1rem',     // 16px
+        'card-gap': '0.75rem',           // 12px
+      },
+      borderRadius: {
+        'standard': '12px',
+      },
+      boxShadow: {
+        'soft': '0 4px 6px -1px rgba(0, 0, 0, 0.05), 0 2px 4px -1px rgba(0, 0, 0, 0.03)',
+      },
       colors: {
         amber: {
           50: '#FFFBF5',

@@ -266,6 +266,8 @@ export interface BookingData {
   status: JobStatus;
   assignedCarpenterId?: string;
   assignedCarpenterName?: string;
+  verificationCode?: string;
+  isVerified?: boolean;
   createdAt: any; // Firestore server timestamp
   updatedAt?: any; // Firestore server timestamp
   acceptedAt?: any; // Firestore server timestamp - when booking was accepted
@@ -403,6 +405,9 @@ export const createBookingWithDistribution = async (
       console.log('📤 Creating booking document in Firestore...');
     }
     
+    // Generate verification code
+    const verificationCode = Math.floor(1000 + Math.random() * 9000).toString();
+          
     // Create the booking document with minimal data for faster creation
     const bookingRef = await addDoc(collection(db, 'bookings'), {
       customerId: bookingData.customerId,
@@ -417,12 +422,15 @@ export const createBookingWithDistribution = async (
       serviceType: bookingData.serviceType || "carpenter", // Default to carpenter for backward compatibility
       status: JobStatus.SEARCHING,
       assignedCarpenterId: null,
+      verificationCode: verificationCode,
+      isVerified: false,
       createdAt: serverTimestamp(),
       updatedAt: serverTimestamp()
     });
-    
+          
     const bookingId = bookingRef.id;
     if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+      console.log('🔐 Generated verification code for booking:', bookingId, 'Code:', verificationCode);
       console.log('✅ Booking created with ID:', bookingId);
       console.log('📄 Booking document reference:', bookingRef.path);
       console.log('📍 Service area:', serviceArea);
@@ -1126,6 +1134,53 @@ export const releaseCarpenterJob = async (carpenterId: string, bookingId?: strin
  * @param bookingId - ID of the booking to start
  * @returns Promise<void>
  */
+export const verifyEntryCode = async (bookingId: string, enteredCode: string): Promise<boolean> => {
+  const bookingRef = doc(db, 'bookings', bookingId);
+  
+  try {
+    const result = await runTransaction(db, async (transaction) => {
+      const bookingSnapshot = await transaction.get(bookingRef);
+      
+      if (!bookingSnapshot.exists()) {
+        throw new Error('Booking does not exist');
+      }
+      
+      const bookingData = bookingSnapshot.data() as BookingData;
+      
+      // Verify booking is in ACCEPTED state
+      if (bookingData.status !== JobStatus.ACCEPTED) {
+        throw new Error('Booking is not in ACCEPTED state');
+      }
+      
+      // Verify code matches
+      if (bookingData.verificationCode !== enteredCode) {
+        return false; // Invalid code
+      }
+      
+      // Update booking to verified and WORK_IN_PROGRESS
+      transaction.update(bookingRef, {
+        isVerified: true,
+        status: JobStatus.WORK_IN_PROGRESS,
+        startedAt: serverTimestamp(),
+        updatedAt: serverTimestamp()
+      });
+      
+      return true; // Valid code
+    });
+    
+    if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+      console.log(`✅ Entry code verification ${result ? 'successful' : 'failed'} for booking ${bookingId}`);
+    }
+    
+    return result;
+  } catch (error) {
+    if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+      console.error('❌ Error verifying entry code:', error);
+    }
+    throw error;
+  }
+};
+
 export const startBookingJob = async (bookingId: string): Promise<void> => {
   const bookingRef = doc(db, 'bookings', bookingId);
   
@@ -1313,6 +1368,18 @@ export const updateBookingStatus = async (bookingId: string, status: JobStatus):
     
     try {
       const bookingRef = doc(db, 'bookings', bookingId);
+      
+      // Verify verification status when trying to complete job
+      if (status === JobStatus.COMPLETED) {
+        const bookingSnapshot = await getDoc(bookingRef);
+        if (bookingSnapshot.exists()) {
+          const bookingData = bookingSnapshot.data() as BookingData;
+          if (bookingData.isVerified !== true) {
+            throw new Error('Verify entry code before completing job');
+          }
+        }
+      }
+      
       // SINGLE update - no retries
       await updateDoc(bookingRef, {
         status,

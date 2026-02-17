@@ -54,18 +54,40 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
   
   // Check if customer has any accepted bookings that were previously searching
   const hasAcceptedBooking = useMemo(() => {
-    return bookings.some(b => 
+    const result = bookings.some(b => 
       b.status === JobStatus.ACCEPTED && 
       b.customerName === user?.name
     );
+      
+    if(process.env.NODE_ENV === 'development') {
+      console.log('🔍 hasAcceptedBooking check:', {
+        allBookings: bookings.map(b => ({id: b.id, status: b.status, customerName: b.customerName, verificationCode: b.verificationCode})),
+        user: user?.name,
+        hasAccepted: result,
+        acceptedBookings: bookings.filter(b => b.status === JobStatus.ACCEPTED && b.customerName === user?.name)
+      });
+    }
+      
+    return result;
   }, [bookings, user?.name]);
       
   // Get the accepted booking for verification display
   const acceptedBooking = useMemo(() => {
-    return bookings.find(b => 
+    const result = bookings.find(b => 
       b.status === JobStatus.ACCEPTED && 
       b.customerName === user?.name
     );
+      
+    if(process.env.NODE_ENV === 'development') {
+      console.log('🔍 acceptedBooking find:', {
+        allBookings: bookings.map(b => ({id: b.id, status: b.status, customerName: b.customerName, verificationCode: b.verificationCode})),
+        user: user?.name,
+        found: result,
+        hasVerificationCode: !!result?.verificationCode
+      });
+    }
+      
+    return result;
   }, [bookings, user?.name]);
   
   // Store previous searching state to detect transition
@@ -121,9 +143,73 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
     
     // If we had a searching job and now have an accepted job, show acceptance screen
     if (hadSearchingJob.current && !currentlySearching && hasAccepted && !showAcceptanceScreen) {
-      if(process.env.NODE_ENV === 'development') console.log('🎯 Detected transition: SEARCHING → ACCEPTED');
+      if(process.env.NODE_ENV === 'development') console.log('🎯 Detected transition: SEARCHING → ACCEPTED', {
+        user: user?.name,
+        bookingFound: acceptedBooking,
+        hasVerificationCode: !!acceptedBooking?.verificationCode,
+        verificationCode: acceptedBooking?.verificationCode
+      });
+      
+      // Ensure we have the latest booking data with verification code
+      setTimeout(() => {
+        window.dispatchEvent(new CustomEvent('refreshBookings'));
+      }, 500);
+      
+      // Enhanced verification code fetching with multiple strategies
+      const fetchVerificationCode = async () => {
+        try {
+          const { doc, getDoc } = await import('firebase/firestore');
+          const { db } = await import('../firebase');
+          
+          // Find the accepted booking
+          const acceptedBooking = bookings.find(b => 
+            b.status === JobStatus.ACCEPTED && 
+            b.customerName === user?.name
+          );
+          
+          if (acceptedBooking?.id) {
+            if(process.env.NODE_ENV === 'development') {
+              console.log('🔄 ATTEMPTING DIRECT VERIFICATION CODE FETCH:', {
+                bookingId: acceptedBooking.id,
+                currentHasCode: !!acceptedBooking.verificationCode,
+                attemptTime: new Date().toISOString()
+              });
+            }
+            
+            const bookingDoc = await getDoc(doc(db, 'bookings', acceptedBooking.id));
+            if (bookingDoc.exists()) {
+              const bookingData = bookingDoc.data();
+              if(process.env.NODE_ENV === 'development') {
+                console.log('✅ DIRECT FIRESTORE FETCH RESULT:', {
+                  bookingId: acceptedBooking.id,
+                  firestoreHasCode: !!bookingData.verificationCode,
+                  firestoreCode: bookingData.verificationCode,
+                  firestoreIsVerified: bookingData.isVerified,
+                  firestoreStatus: bookingData.status,
+                  localHasCode: !!acceptedBooking.verificationCode,
+                  localCode: acceptedBooking.verificationCode
+                });
+              }
+              
+              // If we found the verification code in Firestore but not in local state
+              if (bookingData.verificationCode && !acceptedBooking.verificationCode) {
+                console.log('🎯 VERIFICATION CODE FOUND IN FIRESTORE, TRIGGERING REFRESH');
+                window.dispatchEvent(new CustomEvent('refreshBookings'));
+              }
+            }
+          }
+        } catch (error) {
+          console.error('❌ Direct verification code fetch error:', error);
+        }
+      };
+      
+      // Multiple fetch attempts with different intervals
+      setTimeout(fetchVerificationCode, 500);  // First attempt
+      setTimeout(fetchVerificationCode, 1500); // Second attempt
+      setTimeout(fetchVerificationCode, 3000); // Third attempt
+      
       setShowAcceptanceScreen(true);
-      // Hide after 3 seconds
+      // Hide after 15 seconds to allow time to see verification code
       setTimeout(() => {
         setShowAcceptanceScreen(false);
         // Switch to jobs tab after showing acceptance screen
@@ -131,7 +217,7 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
           const event = new CustomEvent('switchTab', { detail: 'jobs' });
           window.dispatchEvent(event);
         }
-      }, 3000);
+      }, 15000);
     }
     
     // Also check if any booking changed from SEARCHING to ACCEPTED
@@ -147,7 +233,12 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
     
     // Only show acceptance screen if no cancellation occurred for this transition
     if (searchToAcceptTransition && !showAcceptanceScreen && !cancellationOccurred) {
-      if(process.env.NODE_ENV === 'development') console.log('🎯 Detected direct status change: SEARCHING → ACCEPTED');
+      if(process.env.NODE_ENV === 'development') console.log('🎯 Detected direct status change: SEARCHING → ACCEPTED', {
+        user: user?.name,
+        bookingFound: acceptedBooking,
+        hasVerificationCode: !!acceptedBooking?.verificationCode,
+        verificationCode: acceptedBooking?.verificationCode
+      });
       setShowAcceptanceScreen(true);
       setTimeout(() => {
         setShowAcceptanceScreen(false);
@@ -155,7 +246,7 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
           const event = new CustomEvent('switchTab', { detail: 'jobs' });
           window.dispatchEvent(event);
         }
-      }, 3000);
+      }, 15000);
     } else if (cancellationOccurred) {
       if(process.env.NODE_ENV === 'development') console.log('🎯 Cancellation detected, hiding acceptance screen if showing');
       // If cancellation occurred and acceptance screen is showing, hide it
@@ -461,12 +552,6 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
   // Removed map view - using simple area selection instead
 
   if (showAcceptanceScreen) {
-    // Get the accepted booking to display details
-    const acceptedBooking = bookings.find(b => 
-      b.status === JobStatus.ACCEPTED && 
-      b.customerName === user?.name
-    );
-    
     // Check if there's a cancelled booking to avoid showing acceptance screen when cancelled
     const cancelledBooking = bookings.find(b => 
       b.status === JobStatus.CANCELLED && 
@@ -480,86 +565,191 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
       return null; // Return null to render nothing
     }
     
-    // Debug logging
+    // Comprehensive debug logging
     if(process.env.NODE_ENV === 'development') {
-      console.log('🎯 Acceptance screen debug:', {
-        acceptedBooking,
-        hasVerificationCode: !!acceptedBooking?.verificationCode,
-        bookingId: acceptedBooking?.id,
-        status: acceptedBooking?.status,
-        verificationCode: acceptedBooking?.verificationCode
+      console.log('🎯 ACCEPTANCE SCREEN DEBUG:', {
+        user: user?.name,
+        showAcceptanceScreen,
+        acceptedBooking: acceptedBooking ? {
+          id: acceptedBooking.id,
+          status: acceptedBooking.status,
+          customerName: acceptedBooking.customerName,
+          hasVerificationCode: !!acceptedBooking.verificationCode,
+          verificationCode: acceptedBooking.verificationCode,
+          isVerified: acceptedBooking.isVerified
+        } : null,
+        allBookings: bookings.map(b => ({
+          id: b.id,
+          status: b.status,
+          customerName: b.customerName,
+          hasVerificationCode: !!b.verificationCode,
+          verificationCode: b.verificationCode,
+          isVerified: b.isVerified
+        }))
       });
+        
+      // Check if there are any bookings with verification codes but not showing
+      const bookingsWithCodes = bookings.filter(b => b.verificationCode);
+      if (bookingsWithCodes.length > 0) {
+        console.log('🔐 BOOKINGS WITH VERIFICATION CODES:', bookingsWithCodes.map(b => ({
+          id: b.id,
+          status: b.status,
+          customerName: b.customerName,
+          verificationCode: b.verificationCode,
+          isVerified: b.isVerified
+        })));
+      }
       
-      // Log all bookings for debugging
-      console.log('📋 All current bookings:', bookings.map(b => ({
-        id: b.id,
-        status: b.status,
-        customerName: b.customerName,
-        hasVerificationCode: !!b.verificationCode,
-        verificationCode: b.verificationCode
-      })));
+      // Check if we have an accepted booking but no verification code is showing
+      const acceptedBookingWithoutCode = bookings.find(b => 
+        b.status === JobStatus.ACCEPTED && 
+        b.customerName === user?.name && 
+        !b.verificationCode
+      );
       
+      if (acceptedBookingWithoutCode && showAcceptanceScreen) {
+        console.log('⚠️ ACCEPTED BOOKING WITHOUT VERIFICATION CODE:', {
+          bookingId: acceptedBookingWithoutCode.id,
+          status: acceptedBookingWithoutCode.status,
+          customerName: acceptedBookingWithoutCode.customerName,
+          hasLocalCode: !!acceptedBookingWithoutCode.verificationCode,
+          localCode: acceptedBookingWithoutCode.verificationCode
+        });
+      }
+        
       // Direct Firestore check for verification code
       if (acceptedBooking?.id) {
         import('firebase/firestore').then(async (firestore) => {
           const { doc, getDoc } = firestore;
           import('../firebase').then(async (firebase) => {
             const bookingDoc = await getDoc(doc(firebase.db, 'bookings', acceptedBooking.id));
-            console.log('🔍 Direct Firestore check for accepted booking:', {
-              exists: bookingDoc.exists(),
-              data: bookingDoc.exists() ? bookingDoc.data() : null,
-              verificationCode: bookingDoc.exists() ? bookingDoc.data().verificationCode : null
+            console.log('🔍 DIRECT FIRESTORE VERIFICATION:', {
+              bookingId: acceptedBooking.id,
+              documentExists: bookingDoc.exists(),
+              firestoreData: bookingDoc.exists() ? {
+                status: bookingDoc.data().status,
+                verificationCode: bookingDoc.data().verificationCode,
+                isVerified: bookingDoc.data().isVerified,
+                customerName: bookingDoc.data().customerName
+              } : null
             });
           });
         });
       }
     }
     
-    // Refresh bookings when verification code might be available
+    // Enhanced verification code polling with comprehensive error handling
     useEffect(() => {
-      if (showAcceptanceScreen && acceptedBooking && !acceptedBooking.verificationCode) {
-        // Direct Firestore fetch for the specific booking
-        const fetchBookingDirectly = async () => {
-          try {
-            const { doc, getDoc } = await import('firebase/firestore');
-            const { db } = await import('../firebase');
-            
-            const bookingDoc = await getDoc(doc(db, 'bookings', acceptedBooking.id));
-            if (bookingDoc.exists()) {
-              const bookingData = bookingDoc.data();
-              if(process.env.NODE_ENV === 'development') {
-                console.log('🔍 Direct Firestore fetch result:', {
-                  id: acceptedBooking.id,
-                  verificationCode: bookingData.verificationCode,
-                  isVerified: bookingData.isVerified
-                });
-              }
+      if (showAcceptanceScreen) {
+        // Find the current accepted booking
+        const currentAcceptedBooking = bookings.find(b => 
+          b.status === JobStatus.ACCEPTED && 
+          b.customerName === user?.name
+        );
+        
+        if (currentAcceptedBooking && !currentAcceptedBooking.verificationCode) {
+          if(process.env.NODE_ENV === 'development') {
+            console.log('🔄 STARTING ENHANCED VERIFICATION CODE POLLING:', {
+              bookingId: currentAcceptedBooking.id,
+              customerName: currentAcceptedBooking.customerName,
+              startTime: new Date().toISOString()
+            });
+          }
+          
+          let consecutiveErrors = 0;
+          const maxConsecutiveErrors = 5;
+          
+          // Direct Firestore fetch for the specific booking
+          const fetchBookingDirectly = async () => {
+            try {
+              const { doc, getDoc } = await import('firebase/firestore');
+              const { db } = await import('../firebase');
               
-              // If we found the verification code, trigger a full refresh
-              if (bookingData.verificationCode) {
-                window.dispatchEvent(new CustomEvent('refreshBookings'));
+              const bookingDoc = await getDoc(doc(db, 'bookings', currentAcceptedBooking.id));
+              
+              // Reset error counter on successful fetch
+              consecutiveErrors = 0;
+              
+              if (bookingDoc.exists()) {
+                const bookingData = bookingDoc.data();
+                if(process.env.NODE_ENV === 'development') {
+                  console.log('🔍 DIRECT FIRESTORE POLLING RESULT:', {
+                    timestamp: new Date().toISOString(),
+                    bookingId: currentAcceptedBooking.id,
+                    firestoreHasCode: !!bookingData.verificationCode,
+                    firestoreCode: bookingData.verificationCode,
+                    firestoreIsVerified: bookingData.isVerified,
+                    firestoreStatus: bookingData.status,
+                    localHasCode: !!currentAcceptedBooking.verificationCode,
+                    localCode: currentAcceptedBooking.verificationCode
+                  });
+                }
+                
+                // If we found the verification code, trigger a full refresh
+                if (bookingData.verificationCode && !currentAcceptedBooking.verificationCode) {
+                  console.log('🎯 VERIFICATION CODE DETECTED IN POLLING, TRIGGERING REFRESH');
+                  window.dispatchEvent(new CustomEvent('refreshBookings'));
+                }
+              } else {
+                console.warn('⚠️ Booking document not found during polling:', currentAcceptedBooking.id);
+              }
+            } catch (error) {
+              consecutiveErrors++;
+              console.error(`❌ Polling error (${consecutiveErrors}/${maxConsecutiveErrors}):`, error);
+              
+              // Stop polling if too many consecutive errors
+              if (consecutiveErrors >= maxConsecutiveErrors) {
+                console.error('🚨 STOPPING POLLING DUE TO TOO MANY CONSECUTIVE ERRORS');
+                clearInterval(refreshInterval);
+                clearTimeout(stopInterval);
               }
             }
-          } catch (error) {
-            console.error('❌ Error in direct Firestore fetch:', error);
-          }
-        };
-        
-        // Fetch immediately and then every 2 seconds
-        fetchBookingDirectly();
-        const refreshInterval = setInterval(fetchBookingDirectly, 2000);
-        
-        // Stop after 15 seconds
-        const stopInterval = setTimeout(() => {
-          clearInterval(refreshInterval);
-        }, 15000);
-        
-        return () => {
-          clearInterval(refreshInterval);
-          clearTimeout(stopInterval);
-        };
+          };
+          
+          // Aggressive polling schedule: 500ms, 1s, 1.5s, 2s, then every 2s
+          const pollingSchedule = [500, 1000, 1500, 2000];
+          let scheduleIndex = 0;
+          
+          const startScheduledPolling = () => {
+            if (scheduleIndex < pollingSchedule.length) {
+              setTimeout(() => {
+                fetchBookingDirectly();
+                scheduleIndex++;
+                if (scheduleIndex < pollingSchedule.length) {
+                  startScheduledPolling();
+                } else {
+                  // Switch to regular interval polling
+                  refreshInterval = setInterval(fetchBookingDirectly, 2000);
+                }
+              }, pollingSchedule[scheduleIndex]);
+            }
+          };
+          
+          // Start the scheduled polling
+          startScheduledPolling();
+          
+          // Regular interval polling reference (will be set after scheduled polling)
+          let refreshInterval: NodeJS.Timeout;
+          
+          // Stop after 30 seconds (extended duration)
+          const stopInterval = setTimeout(() => {
+            if (refreshInterval) {
+              clearInterval(refreshInterval);
+            }
+            if(process.env.NODE_ENV === 'development') {
+              console.log('🔍 STOPPING VERIFICATION CODE POLLING AFTER 30 SECONDS');
+            }
+          }, 30000);
+          
+          return () => {
+            if (refreshInterval) {
+              clearInterval(refreshInterval);
+            }
+            clearTimeout(stopInterval);
+          };
+        }
       }
-    }, [showAcceptanceScreen, acceptedBooking]);
+    }, [showAcceptanceScreen, bookings, user?.name]);
     
     return (
       <div className="flex flex-col items-center justify-center min-h-[80vh] p-8 text-center animate-in fade-in zoom-in-95 duration-500">
@@ -666,6 +856,175 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
     );
   }
   
+  if (showAcceptanceScreen) {
+    // Get the accepted booking to display details
+    const acceptedBooking = bookings.find(b => 
+      b.status === JobStatus.ACCEPTED && 
+      b.customerName === user?.name
+    );
+    
+    // Check if there's a cancelled booking to avoid showing acceptance screen when cancelled
+    const cancelledBooking = bookings.find(b => 
+      b.status === JobStatus.CANCELLED && 
+      b.customerName === user?.name
+    );
+    
+    // Don't show acceptance screen if booking has been cancelled
+    if (cancelledBooking) {
+      // Hide the acceptance screen if a cancellation occurred
+      setShowAcceptanceScreen(false);
+      // Fall through to render main UI
+    } else {
+      // Render acceptance screen
+      return (
+        <div className="flex flex-col items-center justify-center min-h-[80vh] p-8 text-center animate-in fade-in zoom-in-95 duration-500">
+          <div className="relative mb-8">
+            <div className="w-32 h-32 bg-green-500 rounded-full flex items-center justify-center shadow-2xl shadow-green-200 animate-in zoom-in-95">
+              <CheckCircle2 size={48} className="text-white" />
+            </div>
+          </div>
+          <h2 className="text-2xl font-black text-amber-900 mb-2 animate-in slide-in-from-top-4 delay-100">Job Accepted!</h2>
+          <p className="text-sm font-bold text-gray-600 mb-8 italic animate-in slide-in-from-top-4 delay-200">
+            Your request has been accepted by {acceptedBooking?.mistry || 'your mistry'}
+          </p>
+          <div className="bg-white border-2 border-green-200 rounded-2xl p-6 w-full max-w-md shadow-lg animate-in slide-in-from-bottom-4 delay-300">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-green-100 rounded-xl flex items-center justify-center">
+                <div className="w-5 h-5 bg-green-600 rounded-full"></div>
+              </div>
+              <div className="text-left">
+                <p className="text-xs font-black text-gray-500 uppercase tracking-widest">Service Area</p>
+                <p className="text-sm font-bold text-amber-900">{acceptedBooking?.address || 'Your location'}</p>
+              </div>
+            </div>
+            
+            {/* Verification Code Display */}
+            {acceptedBooking && (
+              <div className="mb-6 bg-gradient-to-r from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-4">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-8 h-8 bg-amber-100 rounded-xl flex items-center justify-center">
+                    <ShieldCheck size={20} className="text-amber-600" />
+                  </div>
+                  <div>
+                    <p className="text-[10px] font-black uppercase text-amber-700 tracking-widest">Security Code</p>
+                    <p className="text-xs font-bold text-amber-800">Share with your worker</p>
+                  </div>
+                </div>
+                {acceptedBooking.verificationCode ? (
+                  <div className="bg-white border-2 border-amber-200 rounded-xl p-4 text-center animate-in zoom-in-95">
+                    <p className="text-[10px] font-black uppercase text-gray-500 tracking-widest mb-1">Verification Code</p>
+                    <p className="text-3xl font-black text-amber-900 tracking-widest">{acceptedBooking.verificationCode}</p>
+                    <p className="text-[10px] font-bold text-gray-600 mt-2">Worker must enter this code before starting work</p>
+                  </div>
+                ) : (
+                  <div className="bg-white border-2 border-amber-200 rounded-xl p-4 text-center">
+                    <div className="flex items-center justify-center gap-2 mb-2">
+                      <div className="w-3 h-3 bg-amber-500 rounded-full animate-pulse"></div>
+                      <p className="text-sm font-bold text-amber-700">Generating security code...</p>
+                    </div>
+                    <p className="text-xs text-gray-500 mb-3">This may take a few seconds</p>
+                    <div className="flex gap-2 justify-center flex-wrap">
+                      <button 
+                        onClick={() => window.dispatchEvent(new CustomEvent('refreshBookings'))}
+                        className="text-xs bg-amber-100 hover:bg-amber-200 text-amber-800 px-3 py-1 rounded-lg font-bold transition-colors"
+                      >
+                        Refresh Data
+                      </button>
+                      <button 
+                        onClick={async () => {
+                          try {
+                            const { doc, getDoc } = await import('firebase/firestore');
+                            const { db } = await import('../firebase');
+                                            
+                            const bookingDoc = await getDoc(doc(db, 'bookings', acceptedBooking.id));
+                            if (bookingDoc.exists()) {
+                              const bookingData = bookingDoc.data();
+                              if(process.env.NODE_ENV === 'development') {
+                                console.log('🔍 FORCE FETCH RESULT:', {
+                                  bookingId: acceptedBooking.id,
+                                  hasCode: !!bookingData.verificationCode,
+                                  code: bookingData.verificationCode,
+                                  status: bookingData.status,
+                                  isVerified: bookingData.isVerified
+                                });
+                              }
+                              window.dispatchEvent(new CustomEvent('refreshBookings'));
+                            }
+                          } catch (error) {
+                            console.error('❌ Force fetch error:', error);
+                          }
+                        }}
+                        className="text-xs bg-orange-100 hover:bg-orange-200 text-orange-800 px-3 py-1 rounded-lg font-bold transition-colors"
+                      >
+                        Force Refresh
+                      </button>
+                      <button 
+                        onClick={async () => {
+                          try {
+                            // Attempt to generate a verification code manually if it's missing
+                            const { doc, getDoc, updateDoc } = await import('firebase/firestore');
+                            const { db } = await import('../firebase');
+                            
+                            const bookingRef = doc(db, 'bookings', acceptedBooking.id);
+                            const bookingDoc = await getDoc(bookingRef);
+                            
+                            if (bookingDoc.exists()) {
+                              const bookingData = bookingDoc.data();
+                              if (!bookingData.verificationCode) {
+                                const newCode = Math.floor(1000 + Math.random() * 9000).toString();
+                                await updateDoc(bookingRef, {
+                                  verificationCode: newCode,
+                                  isVerified: false,
+                                  updatedAt: new Date()
+                                });
+                                
+                                console.log('🔄 GENERATED VERIFICATION CODE MANUALLY:', newCode);
+                                window.dispatchEvent(new CustomEvent('refreshBookings'));
+                              }
+                            }
+                          } catch (error) {
+                            console.error('❌ Manual code generation failed:', error);
+                            alert('Failed to generate verification code. Please try again or contact support.');
+                          }
+                        }}
+                        className="text-xs bg-red-100 hover:bg-red-200 text-red-800 px-3 py-1 rounded-lg font-bold transition-colors"
+                        disabled={false}
+                      >
+                        Generate Code
+                      </button>
+                    </div>
+                    <p className="text-xs text-gray-400 mt-2 text-center">If code doesn't appear after 30 seconds, click 'Generate Code'</p>
+                  </div>
+                )}
+              </div>
+            )}
+            <div className="flex items-center gap-3 mb-4">
+              <div className="w-10 h-10 bg-green-100 rounded-xl flex items-center justify-center">
+                <IndianRupee size={20} className="text-green-600" />
+              </div>
+              <div className="text-left">
+                <p className="text-xs font-black text-gray-500 uppercase tracking-widest">Price</p>
+                <p className="text-sm font-bold text-amber-900">{acceptedBooking?.price || '₹400'}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-green-100 rounded-xl flex items-center justify-center">
+                <Clock size={20} className="text-green-600" />
+              </div>
+              <div className="text-left">
+                <p className="text-xs font-black text-gray-500 uppercase tracking-widest">Estimated Time</p>
+                <p className="text-sm font-bold text-amber-900">Arriving soon</p>
+              </div>
+            </div>
+          </div>
+          <p className="text-xs text-gray-400 mt-8 animate-in slide-in-from-bottom-4 delay-500">
+            Redirecting to bookings page...
+          </p>
+        </div>
+      );
+    }
+  }
+  
   if (searchingJob) {
     const elapsed = (Date.now() - searchingJob.createdAt) / 1000;
     const wave = elapsed < 15 ? 1 : (elapsed < 30 ? 2 : 3);
@@ -711,7 +1070,7 @@ const CustomerHome: React.FC<CustomerHomeProps> = ({ onBook, onCancel, onUpdateS
       </div>
     );
   }
-
+  
   return (
     <div className="relative">
       <div className="p-5 animate-in fade-in slide-in-from-bottom-4 duration-500 relative pb-40">

@@ -407,6 +407,15 @@ export const createBookingWithDistribution = async (
     
     // Generate verification code
     const verificationCode = Math.floor(1000 + Math.random() * 9000).toString();
+    
+    if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+      console.log('🔐 VERIFICATION CODE GENERATION:', {
+        customerId: bookingData.customerId,
+        customerName: bookingData.customerName,
+        generatedCode: verificationCode,
+        timestamp: new Date().toISOString()
+      });
+    }
           
     // Create the booking document with minimal data for faster creation
     const bookingRef = await addDoc(collection(db, 'bookings'), {
@@ -1147,9 +1156,9 @@ export const verifyEntryCode = async (bookingId: string, enteredCode: string): P
       
       const bookingData = bookingSnapshot.data() as BookingData;
       
-      // Verify booking is in ACCEPTED state
-      if (bookingData.status !== JobStatus.ACCEPTED) {
-        throw new Error('Booking is not in ACCEPTED state');
+      // Verify booking is in ACCEPTED or ARRIVED state
+      if (bookingData.status !== JobStatus.ACCEPTED && bookingData.status !== JobStatus.ARRIVED) {
+        throw new Error('Booking is not in ACCEPTED or ARRIVED state');
       }
       
       // Verify code matches
@@ -1645,9 +1654,20 @@ export const fetchUserBookings = async (
   // Execute customer query
   const customerSnapshot = await getDocs(customerQuery);
   customerSnapshot.forEach((doc) => {
+      const bookingData = doc.data() as BookingData;
+      if (typeof window !== 'undefined' && process.env.NODE_ENV === 'development') {
+        console.log('📥 CUSTOMER BOOKING FETCHED:', {
+          id: doc.id,
+          customerName: bookingData.customerName,
+          status: bookingData.status,
+          hasVerificationCode: !!bookingData.verificationCode,
+          verificationCode: bookingData.verificationCode,
+          isVerified: bookingData.isVerified
+        });
+      }
       customerBookings.push({
         id: doc.id,
-        ...(doc.data() as BookingData)
+        ...bookingData
       });
     });
     

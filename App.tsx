@@ -600,6 +600,19 @@ const App: React.FC = () => {
           const convertedBookings = await Promise.all(bookingsData.map(async (b) => {
             let mistryPhone = '';
             
+            // Debug logging for verification code tracking
+            if (process.env.NODE_ENV === 'development') {
+              console.log('🔄 BOOKING CONVERSION DEBUG:', {
+                id: b.id,
+                customerName: b.customerName,
+                status: b.status,
+                sourceHasVerificationCode: !!b.verificationCode,
+                sourceVerificationCode: b.verificationCode,
+                sourceIsVerified: b.isVerified,
+                createdAt: b.createdAt?.toDate?.().getTime() || Date.now()
+              });
+            }
+            
             // Get carpenter phone if assigned
             if (b.assignedCarpenterId) {
               try {
@@ -616,7 +629,7 @@ const App: React.FC = () => {
               }
             }
             
-            return {
+            const convertedBooking = {
               id: b.id || '',
               service: b.description,
               mistry: b.assignedCarpenterName || 'Searching...',
@@ -642,6 +655,20 @@ const App: React.FC = () => {
               verificationCode: b.verificationCode,
               isVerified: b.isVerified || false
             };
+            
+            // Verify the converted booking has verification code
+            if (process.env.NODE_ENV === 'development' && b.status === JobStatus.ACCEPTED) {
+              console.log('✅ CONVERTED BOOKING VERIFICATION:', {
+                id: convertedBooking.id,
+                customerName: convertedBooking.customerName,
+                status: convertedBooking.status,
+                convertedHasVerificationCode: !!convertedBooking.verificationCode,
+                convertedVerificationCode: convertedBooking.verificationCode,
+                convertedIsVerified: convertedBooking.isVerified
+              });
+            }
+            
+            return convertedBooking;
           }));
           
           setBookings(convertedBookings);
